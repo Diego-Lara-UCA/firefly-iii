@@ -1,0 +1,122 @@
+name: CI with Gitflow
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+      - 'release/**'
+      - 'hotfix/**'
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  test-feature:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+    name: Test on Feature
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4' # IMPORTANT: As of May 2025, PHP 8.4 is not stable. Verify the actual PHP version your project needs.
+          extensions: mbstring, xml, dom, pdo, mysql, zip # Optional: list of required PHP extensions
+          tools: composer # Optional: installs Composer automatically
+          coverage: none # Optional: 'none', 'xdebug', 'pcov' if you want code coverage
+
+      - name: Validate composer.json and composer.lock files
+        run: composer validate --strict
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor # Directory to cache (where Composer installs dependencies)
+          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }} # Cache key based on OS and composer.lock
+          restore-keys: |
+            ${{ runner.os }}-php-
+
+      - name: Install Composer dependencies
+        # Only run 'composer install' if the cache wasn't fully restored
+        if: steps.composer-cache.outputs.cache-hit != 'true'
+        run: composer install --prefer-dist --no-progress --no-suggest
+
+      - name: Run Unit Tests with PHPUnit (Backend)
+        run: ./vendor/bin/phpunit
+
+  build-and-test-develop:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/develop') || \
+        (github.event_name == 'pull_request' && github.base_ref == 'refs/heads/develop')
+    name: Build and Test on Develop / PR to Develop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4' # IMPORTANT: Verify the actual PHP version your project needs.
+          extensions: mbstring, xml, dom, pdo, mysql, zip # Adjust according to your needs
+          tools: composer
+          coverage: none # Change to 'xdebug' or 'pcov' if you want to generate coverage reports
+
+      - name: Validate composer.json and composer.lock files
+        run: composer validate --strict
+
+      - name: Get Composer cache directory
+        id: composer-cache-develop # Unique cache ID for this job
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-
+
+      - name: Install Composer dependencies
+        if: steps.composer-cache-develop.outputs.cache-hit != 'true'
+        run: composer install --prefer-dist --no-progress --no-suggest
+
+      - name: Run Unit Tests with PHPUnit (Backend)
+        run: ./vendor/bin/phpunit
+
+  build-release-hotfix-and-pr-to-main:
+    if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/'))) || \
+        (github.event_name == 'pull_request' && github.base_ref == 'refs/heads/main')
+    name: Build and Test Release/Hotfix / PR to Main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4' # IMPORTANT: Verify the actual PHP version your project needs.
+          extensions: mbstring, xml, dom, pdo, mysql, zip
+          tools: composer
+
+      - name: Validate composer.json and composer.lock files
+        run: composer validate --strict
+
+      - name: Get Composer cache directory
+        id: composer-cache-release
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-
+
+      - name: Install Composer dependencies
+        if: steps.composer-cache-release.outputs.cache-hit != 'true'
+        run: composer install --no-dev --prefer-dist --no-progress --no-suggest --optimize-autoloader
+
+      - name: Run Unit Tests with PHPUnit (Backend)
+        run: ./vendor/bin/phpunit
