@@ -25,7 +25,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4' # IMPORTANT: As of May 2025, PHP 8.4 is not stable. Verify the actual PHP version your project needs.
+          php-version: '8.4' # IMPORTANT: As of May 2025, PHP 8.4 is not stable. Verify the actual PHP version your project needs (e.g., '8.1', '8.2', '8.3').
           extensions: mbstring, xml, dom, pdo, mysql, zip # Optional: list of required PHP extensions
           tools: composer # Optional: installs Composer automatically
           coverage: none # Optional: 'none', 'xdebug', 'pcov' if you want code coverage
@@ -51,8 +51,8 @@ jobs:
         run: ./vendor/bin/phpunit
 
   build-and-test-develop:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/develop') || \
-        (github.event_name == 'pull_request' && github.base_ref == 'refs/heads/develop')
+    # --- CORRECTION HERE ---
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'pull_request' && github.base_ref == 'refs/heads/develop')
     name: Build and Test on Develop / PR to Develop
     runs-on: ubuntu-latest
     steps:
@@ -87,8 +87,8 @@ jobs:
         run: ./vendor/bin/phpunit
 
   build-release-hotfix-and-pr-to-main:
-    if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/'))) || \
-        (github.event_name == 'pull_request' && github.base_ref == 'refs/heads/main')
+    # --- CORRECTION HERE ---
+    if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/'))) || (github.event_name == 'pull_request' && github.base_ref == 'refs/heads/main')
     name: Build and Test Release/Hotfix / PR to Main
     runs-on: ubuntu-latest
     steps:
