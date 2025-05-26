@@ -345,4 +345,143 @@ class ExportXlsData {
             return response()->json(['error' => 'Error generando el archivo Excel.', 'details' => $errorMessage, 'file' => $errorFile, 'line' => $errorLine], 500);
         }
     }
+
+    /**
+     * Generate transaction history report export
+     *
+     * @throws FireflyException
+     */
+    
+    public function GenerateTransactionReport(TransactionHistoryXLSExportRequest $request): JsonResponse {
+        try {
+            $validatedData = $request->validated();
+
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheetName = 'TransactionHistory';
+            $sheet->setTitle($sheetName);
+
+            $currentRow = 1; // Fila actual para colocar elementos
+
+            // --- Chart 1: "Chart for all transactions for account..." ---
+            $creditCardAccountName = $validatedData['creditCardChartAccountName'] ?? 'N/A';
+            $creditCardDateRange = $validatedData['creditCardChartDateRange'] ?? 'N/A';
+            $creditCardChartTitle = "Chart for all transactions for account {$creditCardAccountName} between {$creditCardDateRange}";
+            
+            $ccChartDateLabels = $validatedData['creditCardChartDateLabels'] ?? [];
+            $ccChartDebtValues = $validatedData['creditCardChartDebtValues'] ?? [];
+
+            if (count($ccChartDateLabels) > 1 && count($ccChartDebtValues) > 1) {
+                $dataSourceHeaderRow1 = $currentRow;
+                $colLetterForDates1 = Coordinate::stringFromColumnIndex(1); // Col A para fechas
+                $colLetterForValues1 = Coordinate::stringFromColumnIndex(2); // Col B para valores
+
+                $sheet->setCellValue($colLetterForDates1 . $dataSourceHeaderRow1, $ccChartDateLabels[0][0] ?? 'Date');
+                $sheet->setCellValue($colLetterForValues1 . $dataSourceHeaderRow1, $ccChartDebtValues[0][0] ?? 'Debt');
+
+                $num_data_points1 = count($ccChartDateLabels) - 1;
+                $data_start_row1 = $dataSourceHeaderRow1 + 1;
+                $data_end_row1 = $dataSourceHeaderRow1 + $num_data_points1;
+
+                for ($i = 0; $i < $num_data_points1; $i++) {
+                    $sheet->setCellValue($colLetterForDates1 . ($data_start_row1 + $i), $ccChartDateLabels[$i + 1][0] ?? 'N/A');
+                    $sheet->setCellValue($colLetterForValues1 . ($data_start_row1 + $i), (float)($ccChartDebtValues[$i + 1][0] ?? 0));
+                }
+
+                $legendDSV1 = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $sheetName . "'!$" . $colLetterForValues1 . "$" . $dataSourceHeaderRow1, null, 1)];
+                $xAxisDSV1 = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $sheetName . "'!$" . $colLetterForDates1 . "$" . $data_start_row1 . ":$" . $colLetterForDates1 . "$" . $data_end_row1, null, $num_data_points1)];
+                $yValuesDSV1 = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $sheetName . "'!$" . $colLetterForValues1 . "$" . $data_start_row1 . ":$" . $colLetterForValues1 . "$" . $data_end_row1, null, $num_data_points1)];
+                
+                $chartDisplayStartRow1 = $data_end_row1 + 2;
+                $this->addSimpleLineChart(
+                    $sheet, 'creditCardDebtChart', $legendDSV1, $xAxisDSV1, $yValuesDSV1,
+                    'A' . $chartDisplayStartRow1, 'J' . ($chartDisplayStartRow1 + 15),
+                    $creditCardChartTitle
+                );
+                $currentRow = $chartDisplayStartRow1 + 15 + 2; // Actualizar currentRow
+            }
+
+
+            // --- Chart 2: "Cash Wallet" ---
+            $cashWalletChartTitle = "Cash Wallet";
+            $cwChartDateLabels = $validatedData['cashWalletChartDateLabels'] ?? [];
+            $cwChartMoneyValues = $validatedData['cashWalletChartMoneyValues'] ?? [];
+
+            if (count($cwChartDateLabels) > 1 && count($cwChartMoneyValues) > 1) {
+                $dataSourceHeaderRow2 = $currentRow;
+                // Reutilizamos columnas A y B para los datos fuente, pero en filas diferentes
+                $colLetterForDates2 = Coordinate::stringFromColumnIndex(1); // Col A
+                $colLetterForValues2 = Coordinate::stringFromColumnIndex(2); // Col B
+
+                $sheet->setCellValue($colLetterForDates2 . $dataSourceHeaderRow2, $cwChartDateLabels[0][0] ?? 'Date');
+                $sheet->setCellValue($colLetterForValues2 . $dataSourceHeaderRow2, $cwChartMoneyValues[0][0] ?? 'Money');
+
+                $num_data_points2 = count($cwChartDateLabels) - 1;
+                $data_start_row2 = $dataSourceHeaderRow2 + 1;
+                $data_end_row2 = $dataSourceHeaderRow2 + $num_data_points2;
+
+                for ($i = 0; $i < $num_data_points2; $i++) {
+                    $sheet->setCellValue($colLetterForDates2 . ($data_start_row2 + $i), $cwChartDateLabels[$i + 1][0] ?? 'N/A');
+                    $sheet->setCellValue($colLetterForValues2 . ($data_start_row2 + $i), (float)($cwChartMoneyValues[$i + 1][0] ?? 0));
+                }
+
+                $legendDSV2 = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $sheetName . "'!$" . $colLetterForValues2 . "$" . $dataSourceHeaderRow2, null, 1)];
+                $xAxisDSV2 = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $sheetName . "'!$" . $colLetterForDates2 . "$" . $data_start_row2 . ":$" . $colLetterForDates2 . "$" . $data_end_row2, null, $num_data_points2)];
+                $yValuesDSV2 = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $sheetName . "'!$" . $colLetterForValues2 . "$" . $data_start_row2 . ":$" . $colLetterForValues2 . "$" . $data_end_row2, null, $num_data_points2)];
+
+                $chartDisplayStartRow2 = $data_end_row2 + 2;
+                $this->addSimpleLineChart(
+                    $sheet, 'cashWalletChart', $legendDSV2, $xAxisDSV2, $yValuesDSV2,
+                    'A' . $chartDisplayStartRow2, 'J' . ($chartDisplayStartRow2 + 15),
+                    $cashWalletChartTitle
+                );
+                $currentRow = $chartDisplayStartRow2 + 15 + 2; // Actualizar currentRow
+            }
+
+            // --- Table "Account balance" ---
+            $tableHeaders = [
+                "Description", "Balance before", "Amount", "Balance after", "Date", "From", "To", 
+                "Budget", "Category", "Subscription", "Created at", "Updated at", "Notes", 
+                "Interest date", "Book date", "Processing date", "Due date", "Payment date", "Invoice date"
+            ];
+            $tableData = $validatedData['accountBalanceTableData'] ?? [];
+            $this->createTable($sheet, $currentRow, "Account balance", $tableHeaders, $tableData, false);
+
+            $highestColumn = $sheet->getHighestDataColumn();
+            if ($highestColumn) {
+                foreach (range('A', $highestColumn) as $col) {
+                    $sheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            // File saving
+            $writer = new Xlsx($spreadsheet);
+            $writer->setIncludeCharts(true); // Importante para asegurar que los gráficos se guarden
+            
+            $filename = 'transaction_history_' . Carbon::now()->format('Ymd_His') . '.xlsx';
+            $storageDir = storage_path('app/reports'); // Guardar en storage/app/reports
+            if (!is_dir($storageDir)) {
+                mkdir($storageDir, 0755, true);
+            }
+            $filePath = $storageDir . '/' . $filename;
+            $writer->save($filePath);
+
+            return response()->json([
+                'message' => 'Transaction history report generated and saved successfully.',
+                'filename' => $filename,
+                'path' => $filePath
+            ], 200);
+
+        } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
+            Log::error("PhpSpreadsheet Exception in TransactionHistoryReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating transaction history (PhpSpreadsheet).', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            $errorTrace = $e->getTraceAsString();
+            $errorFile = $e->getFile();
+            $errorLine = $e->getLine();
+            Log::error("Generic Exception in TransactionHistoryReport: {$errorMessage}\nTrace: {$errorTrace}\nFile: {$errorFile} Line: {$errorLine}");
+            return response()->json(['error' => 'Error generating transaction history.', 'details' => $errorMessage, 'file' => $errorFile, 'line' => $errorLine], 500);
+        }
+    }
 }

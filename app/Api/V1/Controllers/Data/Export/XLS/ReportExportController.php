@@ -35,4 +35,14 @@ class ReportExportController extends Controller
     {
         return $this->exporter->GenerateDefaultReport($request);
     }
+
+    /**
+     * Transaction history report export
+     *
+     * @throws FireflyException
+     */
+    public function TransactionHistoryReport(TransactionHistoryXLSExportRequest $request): JsonResponse
+    {
+        return $this->exporter->GenerateTransactionReport($request);
+    }
 }
