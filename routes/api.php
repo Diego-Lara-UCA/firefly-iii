@@ -365,17 +365,6 @@ Route::group(
 
 
 // DATA ROUTES
-// Export data as XLS
-// Route::group(
-//     [
-//         'namespace' => 'FireflyIII\Api\V1\Controllers\Data\Export\XLS',
-//         'prefix'    => 'v1/data/export/xls',
-//         'as'        => 'api.v1.data.export.xls.',
-//     ],
-//     static function (): void {
-//         Route::get('default-report', ['uses' => 'DefaultReportXLSController@CreateXLSDefaultReport']);
-//     }
-// );
 // Export data API routes
 Route::group(
     [
@@ -394,7 +383,6 @@ Route::group(
         Route::get('rules', ['uses' => 'ExportController@rules', 'as' => 'rules']);
         Route::get('tags', ['uses' => 'ExportController@tags', 'as' => 'tags']);
         Route::get('transactions', ['uses' => 'ExportController@transactions', 'as' => 'transactions']);
-        Route::get('default-report', ['uses' => 'ExportController@DefaultReport', 'as' => 'default-report']);
     }
 );
 // Destroy data API route
