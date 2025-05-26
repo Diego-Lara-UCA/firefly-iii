@@ -25,10 +25,10 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3' 
-          extensions: mbstring, xml, dom, pdo, mysql, zip 
-          tools: composer 
-          coverage: none 
+          php-version: '8.3'
+          extensions: mbstring, xml, dom, pdo, mysql, zip
+          tools: composer
+          coverage: none
 
       - name: Validate composer.json and composer.lock files
         run: composer validate --strict
@@ -37,18 +37,17 @@ jobs:
         id: composer-cache
         uses: actions/cache@v4
         with:
-          path: vendor 
-          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }} 
+          path: vendor
+          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-php-
 
       - name: Install Composer dependencies
+        # El 'if' y el 'run' ahora son parte del mismo paso
         if: steps.composer-cache.outputs.cache-hit != 'true'
-        
         run: composer install --prefer-dist --no-progress --no-suggest --no-scripts
 
       - name: Run Unit Tests with PHPUnit (Backend)
-        
         run: ./vendor/bin/phpunit
 
   build-and-test-develop:
@@ -62,16 +61,16 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3' 
-          extensions: mbstring, xml, dom, pdo, mysql, zip 
+          php-version: '8.3'
+          extensions: mbstring, xml, dom, pdo, mysql, zip
           tools: composer
-          coverage: none cobertura
+          coverage: none # La palabra "cobertura" aquí era un error tipográfico, la he eliminado.
 
       - name: Validate composer.json and composer.lock files
         run: composer validate --strict
 
       - name: Get Composer cache directory
-        id: composer-cache-develop 
+        id: composer-cache-develop
         uses: actions/cache@v4
         with:
           path: vendor
@@ -80,8 +79,8 @@ jobs:
             ${{ runner.os }}-php-
 
       - name: Install Composer dependencies
+        # El 'if' y el 'run' ahora son parte del mismo paso
         if: steps.composer-cache-develop.outputs.cache-hit != 'true'
-        
         run: composer install --prefer-dist --no-progress --no-suggest --no-scripts
 
       - name: Run Unit Tests with PHPUnit (Backend)
@@ -98,7 +97,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3' 
+          php-version: '8.3'
           extensions: mbstring, xml, dom, pdo, mysql, zip
           tools: composer
 
@@ -115,8 +114,8 @@ jobs:
             ${{ runner.os }}-php-
 
       - name: Install Composer dependencies
+        # El 'if' y el 'run' ahora son parte del mismo paso
         if: steps.composer-cache-release.outputs.cache-hit != 'true'
-      
         run: composer install --prefer-dist --no-progress --no-suggest --optimize-autoloader --no-scripts
 
       - name: Run Unit Tests with PHPUnit (Backend)
