@@ -45,4 +45,14 @@ class ReportExportController extends Controller
     {
         return $this->exporter->GenerateTransactionReport($request);
     }
+
+    /**
+     * Budget report export
+     *
+     * @throws FireflyException
+     */
+    public function BudgetReport(BudgetXLSExportRequest $request): JsonResponse 
+    {
+        return $this->exporter->GenerateBudgetReport($request);
+    }
 }
