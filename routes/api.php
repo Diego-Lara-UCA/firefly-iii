@@ -1006,7 +1006,5 @@ Route::group(
     ],
     static function (): void {
         Route::get('default-report', ['uses' => 'ReportExportController@DefaultReport', 'as' => 'default-report']);
-        Route::get('transaction-history-report', ['uses' => 'ReportExportController@TransactionHistoryReport', 'as' => 'transaction-history-report']);
-        Route::get('budget-report', ['uses' => 'ReportExportController@BudgetReport', 'as' => 'budget-report']);
     }
 );
