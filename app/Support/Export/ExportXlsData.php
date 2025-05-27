@@ -272,8 +272,8 @@ class ExportXlsData {
             $currentRow = 1;
 
             // --- Chart: "Account Balances" ---
-            $chartDateLabelsSource = [['Date'], ['Ene'], ['Feb'], ['Mar'], ['Abr'], ['May']];
-            $chartBalanceValuesSource = [['Balance'], [100], [150], [120], [180], [160]];
+            $chartDateLabelsSource = $validatedData['chartDateLabels'];
+            $chartBalanceValuesSource = $validatedData['chartBalanceValues'];
             
             $dataSourceHeaderRow = $currentRow;
             $colLetterForDates = Coordinate::stringFromColumnIndex(1);
@@ -325,7 +325,7 @@ class ExportXlsData {
             $writer = new Xlsx($spreadsheet);
             $writer->setIncludeCharts(true);
             
-            $filename = 'default_report_INCLUDE_CHARTS_TEST_' . Carbon::now()->format('Ymd_His') . '.xlsx';
+            $filename = 'default_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
             $storageDir = storage_path('app/reports');
             if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
             $filePath = $storageDir . '/' . $filename;
