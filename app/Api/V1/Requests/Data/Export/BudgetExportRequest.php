@@ -5,7 +5,7 @@ namespace FireflyIII\Api\V1\Requests\Data\Export; // Ajusta este namespace
 use FireflyIII\Support\Request\ChecksLogin;
 use Illuminate\Foundation\Http\FormRequest;
 
-class BudgetXLSExportRequest extends FormRequest
+class BudgetExportRequest extends FormRequest
 {
     use ChecksLogin;
 

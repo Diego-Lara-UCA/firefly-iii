@@ -9,7 +9,7 @@ use Illuminate\Foundation\Http\FormRequest;
  * DefaultReportXLSController request.
 */
 
-class DefaultFinancialXLSExportRequest extends FormRequest
+class DefaultReportExportRequest extends FormRequest
 {
      use ChecksLogin;
 
