@@ -29,3 +29,5 @@ resources/assets/v2/node_modules
 resources/assets/v2/build
 public/v2/i18n
 .DS_Store
+.db.env
+.env

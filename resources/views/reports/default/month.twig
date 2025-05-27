@@ -5,7 +5,11 @@
 {% endblock %}
 
 {% block content %}
-
+   <div class="row">
+        <div class="col-lg-12 col-md-12 col-sm-12">
+            {% include 'reports.partials.export_button' %}
+        </div>
+    </div>
     {# chart #}
     <div class="row">
         <div class="col-lg-12 col-md-12 col-sm-12">
@@ -123,7 +127,6 @@
                     <span class="fa fa-refresh fa-spin"></span>
                 </div>
             </div>
-
         </div>
     </div>
     <div class="row">
@@ -168,11 +171,361 @@
         var expenseReportUrl = '{{ route('report-data.operations.expenses', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
         var incExpReportUrl = '{{ route('report-data.operations.operations', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
         var billReportUrl = '{{ route('report-data.bills.overview', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
-
         var accountChartUrl = '{{ route('chart.account.report', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
+
+        // URL para el endpoint de exportación XLS (generación del archivo)
+        var exportXlsDefaultReportUrl = '{{ route('api.v1.data.export.xls.default-report') }}';
+        // No necesitamos la URL de descarga si no vamos a descargar
 
     </script>
     <script type="text/javascript" src="v1/js/ff/reports/all.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
     <script type="text/javascript" src="v1/js/ff/reports/default/all.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
     <script type="text/javascript" src="v1/js/ff/reports/default/month.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
+
+    <script type="text/javascript" nonce="{{ JS_NONCE }}">
+        var dataCollectionAttempted = false;
+
+        function normalizeCurrencyString(originalCellText) {
+            if (typeof originalCellText !== 'string' || originalCellText.trim() === "") {
+                return originalCellText;
+            }
+
+            let cleanedText = originalCellText.replace(/[€$]/g, '').trim(); // Quitar símbolos de moneda comunes y espacios
+
+            const hasDot = cleanedText.includes('.');
+            const hasComma = cleanedText.includes(',');
+
+            if (hasDot && hasComma) {
+                if (cleanedText.lastIndexOf(',') > cleanedText.lastIndexOf('.')) {
+                    // Formato: 1.234,56 (coma es decimal)
+                    cleanedText = cleanedText.replace(/\./g, ''); // Quitar puntos (miles)
+                    cleanedText = cleanedText.replace(/,/g, '.'); // Coma a punto (decimal)
+                } else {
+                    // Formato: 1,234.56 (punto es decimal)
+                    cleanedText = cleanedText.replace(/,/g, ''); // Quitar comas (miles)
+                }
+            } else if (hasComma) {
+                // Solo comas, no puntos. Ej: "1234,56" o "1,234"
+                // Heurística: si una coma es seguida por 1 o 2 dígitos al final, es decimal. Sino, separador de miles.
+                if (/,(\d{1,2})$/.test(cleanedText) && (cleanedText.match(/,/g) || []).length === 1) {
+                    cleanedText = cleanedText.replace(/,/g, '.'); // Coma a punto (decimal)
+                } else {
+                    cleanedText = cleanedText.replace(/,/g, ''); // Quitar comas (miles)
+                }
+            } else if (hasDot) {
+                // Solo puntos, no comas. Ej: "123.45" o "1.234.567"
+                const dotCount = (cleanedText.match(/\./g) || []).length;
+                if (dotCount > 1) {
+                    // Múltiples puntos, asumimos separadores de miles (ej: "200.000" -> "200000")
+                    cleanedText = cleanedText.replace(/\./g, '');
+                }
+                // Si solo hay un punto (ej: "123.45"), parseFloat lo maneja bien.
+            }
+
+            const numericValue = parseFloat(cleanedText);
+            return isNaN(numericValue) ? originalCellText : numericValue;
+        }
+
+        /**
+         * Normaliza una cadena que representa un valor de porcentaje a un número.
+         * @param {string} originalCellText El texto de la celda.
+         * @returns {number|string} El valor numérico o el texto original si no se puede convertir.
+         */
+        function normalizePercentageString(originalCellText) {
+            if (typeof originalCellText !== 'string' || originalCellText.trim() === "") {
+                return originalCellText;
+            }
+            let cleanedText = originalCellText.replace(/%/g, '').trim(); // Quitar símbolo de porcentaje
+            if (cleanedText.includes(',')) { // Asumir coma como decimal para porcentajes
+                cleanedText = cleanedText.replace(/,/g, '.');
+            }
+            const numericValue = parseFloat(cleanedText);
+            return isNaN(numericValue) ? originalCellText : numericValue;
+        }
+        
+        function parseHtmlTable(tableContainerId) {
+            const data = [];
+            const $table = $(`#${tableContainerId}`).find('table');
+            if ($table.length === 0) {
+                console.warn(`[${tableContainerId}] No se encontró la tabla.`);
+                return data;
+            }
+
+            const headerRow = [];
+            $table.find('thead tr th').each(function() {
+                headerRow.push($(this).text().trim());
+            });
+
+            if (headerRow.length > 0) {
+                if (tableContainerId === 'budgetReport' && headerRow.length === 9 && headerRow[6] === "") {
+                    // console.log(`[${tableContainerId}] Cabecera original:`, JSON.stringify(headerRow));
+                    headerRow.splice(6, 1); 
+                    // console.log(`[${tableContainerId}] Cabecera modificada:`, JSON.stringify(headerRow));
+                }
+                data.push(headerRow);
+            } else {
+                console.warn(`[${tableContainerId}] No se pudo determinar la cabecera de la tabla.`);
+            }
+
+            // Procesar tbody y tfoot
+            $table.find('tbody tr, tfoot tr').each(function(rowIndex) {
+                const currentRow = $(this);
+                const row = [];
+                const isInTfoot = currentRow.closest('tfoot').length > 0;
+
+                // if (tableContainerId === 'budgetReport') {
+                //     console.log(`[budgetReport ${isInTfoot ? 'tfoot' : 'tbody'}] HTML de la fila ${rowIndex}:`, currentRow.html());
+                //     console.log(`[budgetReport ${isInTfoot ? 'tfoot' : 'tbody'}] Celdas encontradas en fila ${rowIndex}:`, currentRow.find('td').length);
+                // }
+
+                currentRow.find('td').each(function(cellIndex) {
+                    let cellText = $(this).text().trim();
+
+                    if (tableContainerId === 'accountReport' && cellIndex === 0) {
+                        row.push(cellText); 
+                    } else if (tableContainerId === 'budgetReport') {
+                        // Columnas de salida deseadas para XLS (8): Budget, Date, Budgeted, pct, Spent, pct, Left, Overspent
+
+                        if (isInTfoot) {
+                            // Mapeo para TFOOT de budgetReport
+                            // Asumimos que el HTML tiene 7 <td> elementos:
+                            // td[0] (colspan=2): Suma
+                            // td[1]: Budgeted
+                            // td[2]: pct. (budgeted) - vacío
+                            // td[3]: Spent
+                            // td[4]: pct. (spent) - vacío
+                            // td[5]: CELDA VACÍA INESPERADA
+                            // td[6]: Valor de 'Left'
+                            // El valor de 'Overspent' para el tfoot se asumirá como 0 si no hay td[7]
+
+                            if (cellIndex === 0) { // td[0] "Sum (Euro)" (colspan="2")
+                                row.push(cellText); // Columna 'Budget' para XLS
+                                row.push("");       // Columna 'Date' para XLS (vacía en tfoot)
+                            } else if (cellIndex === 1) { // td[1] 'Budgeted'
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 2) { // td[2] 'pct.' (budgeted)
+                                row.push(""); 
+                            } else if (cellIndex === 3) { // td[3] 'Spent'
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 4) { // td[4] 'pct.' (spent)
+                                row.push("");
+                            }
+                            // cellIndex === 5 es la celda HTML td[5] que sospechamos está vacía y no debe ir a 'Left'.
+                            // La omitimos para la asignación directa a 'Left'.
+                            // La omitimos para la asignación directa a 'Left'.
+                            else if (cellIndex === 6) { // Esta es la celda HTML td[6], que contiene el valor real de 'Left'.
+                                row.push(normalizeCurrencyString(cellText)); // Asignar a la columna 'Left' del XLS.
+                                // Como el HTML tfoot probablemente solo tiene 7 <td> (hasta td[6]),
+                                // y la cabecera del XLS espera 8 columnas,
+                                // necesitamos añadir un valor para 'Overspent'.
+                                // Si la imagen HTML correcta muestra "Overspent: 0,00 €" para el tfoot, usamos 0.
+                                row.push(normalizeCurrencyString("0,00 €")); // O simplemente row.push(0);
+                            }
+                            // Si hubiera una td[7] para Overspent, se manejaría aquí.
+                            // Como no esperamos una td[7] según la hipótesis, el bucle 'each' terminará después de cellIndex === 6.
+                        } else { // Lógica para TBODY (asumiendo que el tbody tiene 9 celdas por fila)
+                            if (cellIndex === 0) { // Budget
+                                row.push(cellText);
+                            } else if (cellIndex === 1) { // Date
+                                row.push(cellText);
+                            } else if (cellIndex === 2) { // Budgeted
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 3) { // pct. (Budgeted)
+                                row.push(normalizePercentageString(cellText));
+                            } else if (cellIndex === 4) { // Spent
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 5) { // pct. (Spent)
+                                row.push(normalizePercentageString(cellText));
+                            }
+                            // cellIndex === 6 es la celda vacía en tbody, se omite para el XLS.
+                            else if (cellIndex === 7) { // Left
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 8) { // Overspent
+                                row.push(normalizeCurrencyString(cellText));
+                            }
+                        }
+                    } else {
+                        // Lógica general de parseo para otras tablas
+                        // Asumimos que son valores monetarios por defecto si no son casos especiales
+                        if (cellText.toLowerCase().includes('sum of sums')) { // Mantener texto especial
+                            row.push(cellText);
+                        } else {
+                            row.push(normalizeCurrencyString(cellText));
+                        }
+                    }
+                });
+
+                if (row.length > 0) {
+                    const actualHeaderRowForComparison = data.length > 0 ? data[0] : [];
+                    if (actualHeaderRowForComparison.length > 0 && row.length !== actualHeaderRowForComparison.length) {
+                        // console.warn(`[${tableContainerId}${isInTfoot ? ' tfoot' : ''}] Discrepancia en columnas para fila ${rowIndex}: Cabecera tiene ${actualHeaderRowForComparison.length}, Fila de datos tiene ${row.length}. Cabecera:`, actualHeaderRowForComparison, `Datos:`, row);
+                    }
+                    if (!(data.length === 1 && row.every(cell => cell === "" || cell === null || typeof cell === 'undefined'))) {
+                        data.push(row);
+                    }
+                }
+            });
+            return data;
+        }
+
+        function collectAndTriggerExport() { 
+            if (dataCollectionAttempted) return;
+            dataCollectionAttempted = true;
+
+            const $exportButton = $('#exportXlsLink');
+            var originalText = $exportButton.html();
+            $exportButton.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
+
+            const exportData = {
+                chartDateLabels: [['Fecha']],
+                chartBalanceValues: [['Saldo ($)']], 
+                accountBalancesTableData: [],
+                incomeVsExpensesTableData: [],
+                revenueIncomeTableData: [],
+                expensesTableData: [],
+                budgetsTableData: [],
+                categoriesTableData: [],
+                budgetSplitAccountTableData: [],
+                subscriptionsTableData: []
+            };
+
+            if (typeof window.accountBalancesChart !== 'undefined' && window.accountBalancesChart.data) {
+                const chartInstance = window.accountBalancesChart; // Para facilitar la lectura
+                const chartLabels = chartInstance.data.labels;
+                const datasets = chartInstance.data.datasets;
+
+                if (chartLabels && chartLabels.length > 0) {
+                    // Usar etiquetas del gráfico si están disponibles
+                    chartLabels.forEach((label, index) => { 
+                        console.log(`[Chart Label ${index}] Original:`, label, typeof label); // Añadir typeof label
+
+                        const momentDate = moment(label, "MMMM Do, YYYY", "es");
+                        
+                        console.log(`[Chart Label ${index}] MomentDate Object:`, momentDate);
+                        console.log(`[Chart Label ${index}] Is Valid:`, momentDate.isValid());
+                        
+                        const formattedLabel = momentDate.isValid() ? momentDate.format("YYYY-MM-DD") : label;
+                        console.log(`[Chart Label ${index}] Formatted:`, formattedLabel);
+                        
+                        exportData.chartDateLabels.push([formattedLabel]);
+                    });
+
+                    if (datasets && datasets.length > 0 && datasets[0].data && datasets[0].data.length > 0) {
+                        // Si hay datos en el dataset, usarlos
+                        if (datasets[0].label) { 
+                            exportData.chartBalanceValues[0] = [datasets[0].label];
+                        }
+                        datasets[0].data.forEach(value => {
+                            // Asegurarse de que los valores de saldo sean números si es necesario,
+                            // aunque Chart.js usualmente los maneja como números.
+                            // El backend parece esperar números para los saldos.
+                            exportData.chartBalanceValues.push([parseFloat(value)]);
+                        });
+                    } else {
+                        // Hay etiquetas pero no valores de datos, rellenar con ceros
+                        if (datasets && datasets.length > 0 && datasets[0].label) { 
+                            exportData.chartBalanceValues[0] = [datasets[0].label];
+                        }
+                        chartLabels.forEach(() => exportData.chartBalanceValues.push([0]));
+                    }
+                } else {
+                    // No hay etiquetas del gráfico, usar fechas de inicio/fin del informe
+                    console.warn('El gráfico no tiene etiquetas. Usando fechas de inicio/fin del informe para chartDateLabels.');
+                    const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD"); // Asume que startDate es YYYYMMDD
+                    exportData.chartDateLabels.push([formattedStartDate]);
+                    exportData.chartBalanceValues.push([0]); 
+
+                    if (startDate !== endDate) {
+                        const formattedEndDate = moment(endDate, "YYYYMMDD").format("YYYY-MM-DD"); // Asume que endDate es YYYYMMDD
+                        exportData.chartDateLabels.push([formattedEndDate]);
+                        exportData.chartBalanceValues.push([0]); 
+                    }
+                }
+            } else {
+                // window.accountBalancesChart no está definido o no tiene .data
+                console.warn('window.accountBalancesChart no está definido o no tiene datos. Usando fallback para chartDateLabels y chartBalanceValues.');
+                const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD");
+                exportData.chartDateLabels.push([formattedStartDate]);
+                exportData.chartBalanceValues.push([0]);
+
+                if (startDate !== endDate) {
+                    const formattedEndDate = moment(endDate, "YYYYMMDD").format("YYYY-MM-DD");
+                    exportData.chartDateLabels.push([formattedEndDate]);
+                    exportData.chartBalanceValues.push([0]);
+                }
+            }
+
+            exportData.accountBalancesTableData = parseHtmlTable('accountReport');
+            exportData.incomeVsExpensesTableData = parseHtmlTable('incomeVsExpenseReport');
+            exportData.revenueIncomeTableData = parseHtmlTable('incomeReport');
+            exportData.expensesTableData = parseHtmlTable('expenseReport');
+            exportData.budgetsTableData = parseHtmlTable('budgetReport');
+            exportData.categoriesTableData = parseHtmlTable('categoryReport');
+            exportData.budgetSplitAccountTableData = parseHtmlTable('balanceReport');
+            exportData.subscriptionsTableData = parseHtmlTable('billReport');
+
+            console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
+
+            $.ajax({
+                url: exportXlsDefaultReportUrl,
+                type: 'POST', 
+                contentType: 'application/json; charset=utf-8', 
+                data: JSON.stringify(exportData), 
+                dataType: 'json', 
+                success: function(response) {
+                    if (response.filename && response.path) {
+                        console.log('Informe generado en el servidor:', response.filename, 'en la ruta:', response.path);
+                        alert('El informe XLS se ha generado en el servidor.');
+                    } else {
+                        console.error('Respuesta inesperada del servidor:', response);
+                        alert('Error: El servidor no devolvió la información del archivo esperada.');
+                    }
+                },
+                error: function(jqXHR, textStatus, errorThrown) {
+                    // El error "Undefined array key chartDateLabels" sugiere que el backend NO está recibiendo el cuerpo
+                    // o no lo está procesando como esperas para una petición GET.
+                    console.error('Error en la generación del XLS:', textStatus, errorThrown, jqXHR.responseText);
+                    alert('Error al generar el informe XLS. Consulta la consola para más detalles.');
+                },
+                complete: function() {
+                    $exportButton.removeClass('disabled').prop('disabled', false).html(originalText);
+                    dataCollectionAttempted = false;
+                }
+            });
+        }
+
+        var initialAjaxCompleted = false;
+        $(document).ajaxStop(function() {
+            if (!initialAjaxCompleted) {
+                initialAjaxCompleted = true;
+                
+                $('#exportXlsLink').off('click').on('click', function(e) {
+                    e.preventDefault();
+                    if ($(this).hasClass('disabled')) {
+                        return;
+                    }
+                    dataCollectionAttempted = false; 
+                    collectAndTriggerExport(); // Llamar a la función renombrada
+                });
+                console.log("Manejador de clic para procesamiento XLS adjuntado después de ajaxStop.");
+            }
+        });
+        
+        $(document).ready(function() {
+            setTimeout(function() {
+                if (!initialAjaxCompleted) {
+                     console.warn("ajaxStop no se disparó, adjuntando manejador de clic para XLS directamente.");
+                     $('#exportXlsLink').off('click').on('click', function(e) {
+                        e.preventDefault();
+                        if ($(this).hasClass('disabled')) {
+                            return;
+                        }
+                        dataCollectionAttempted = false;
+                        collectAndTriggerExport();
+                    });
+                }
+            }, 2000);
+        });
+
+    </script>
 {% endblock %}

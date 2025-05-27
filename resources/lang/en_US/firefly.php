@@ -2902,4 +2902,9 @@ return [
     // dashboard
     'enable_auto_convert'                                     => 'Enable currency conversion',
     'disable_auto_convert'                                    => 'Disable currency conversion',
+
+    // Export Button
+    'export'                                                  => 'Export',
+    'export_as_xls'                                           => 'Export as XLS',
+    'export_as_pdf'                                           => 'Export as PDF',
 ];
