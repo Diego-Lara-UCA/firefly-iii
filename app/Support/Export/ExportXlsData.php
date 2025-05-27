@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace FireflyIII\Support\Export;
 
 use FireflyIII\Exceptions\FireflyException;
-use FireflyIII\Api\V1\Requests\Data\Export\DefaultFinancialXLSExportRequest;
-use FireflyIII\Api\V1\Requests\Data\Export\TransactionHistoryXLSExportRequest;
-use FireflyIII\Api\V1\Requests\Data\Export\BudgetXLSExportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\DefaultReportExportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\TransactionHistoryExportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\BudgetExportRequest;
 
 use Carbon\Carbon;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -262,7 +262,7 @@ class ExportXlsData {
      * @throws FireflyException
     */
 
-    public function GenerateDefaultReport (DefaultFinancialXLSExportRequest $request): JsonResponse {
+    public function GenerateDefaultReport (DefaultReportExportRequest $request): JsonResponse {
         try {
             $validatedData = $request->validated();
             $spreadsheet = new Spreadsheet();
@@ -352,7 +352,7 @@ class ExportXlsData {
      * @throws FireflyException
      */
     
-    public function GenerateTransactionReport(TransactionHistoryXLSExportRequest $request): JsonResponse {
+    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): JsonResponse {
         try {
             $validatedData = $request->validated();
 
@@ -491,7 +491,7 @@ class ExportXlsData {
      * @throws FireflyException
      */
     
-    public function GenerateBudgetReport(BudgetXLSExportRequest $request): JsonResponse {
+    public function GenerateBudgetReport(BudgetExportRequest $request): JsonResponse {
         try {
             $validatedData = $request->validated();
 

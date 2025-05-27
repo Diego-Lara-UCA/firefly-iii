@@ -1,25 +1,25 @@
 <?php
 
-namespace FireflyIII\Api\V1\Controllers\Data\Export\XLS;
+namespace FireflyIII\Api\V1\Controllers\Data\Export\PDF;
 
 use FireflyIII\Api\V1\Controllers\Controller;
 use FireflyIII\Api\V1\Requests\Data\Export\DefaultReportExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\TransactionHistoryExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\BudgetExportRequest;
 use FireflyIII\Exceptions\FireflyException;
-use FireflyIII\Support\Export\ExportXlsData;
+use FireflyIII\Support\Export\ExportPdfData;
 use Illuminate\Http\JsonResponse;
 
 class ReportExportController extends Controller
 {
-    private ExportXlsData $exporter;
+    private ExportPdfData $exporter;
 
     public function __construct()
     {
         parent::__construct();
         $this->middleware(
             function ($request, $next) {
-                $this->exporter = app(ExportXlsData::class);
+                $this->exporter = app(ExportPdfData::class);
                 //$this->exporter->setUser(auth()->user());
                 return $next($request);
             }
