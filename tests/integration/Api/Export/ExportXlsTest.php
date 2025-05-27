@@ -2,18 +2,17 @@
 
 declare(strict_types=1);
 
-namespace Tests\integration\Api\Export; // Asegúrate que este namespace sea correcto para tu estructura
+namespace Tests\integration\Api\Export;
 
-use Tests\integration\TestCase;     // Extiende la clase base de tus pruebas de integración
-use PhpOffice\PhpSpreadsheet\IOFactory; // Para leer el archivo Excel
+use Tests\integration\TestCase;     
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 
 final class ExportXlsTest extends TestCase
 {
-    private $user; // Propiedad para almacenar el usuario autenticado
+    // ... (propiedades $user y método getReportRequestBodyData sin cambios) ...
+    private $user;
 
-    /**
-     * Provee los datos JSON que se enviarán en el cuerpo de la solicitud a la API.
-     */
     private function getReportRequestBodyData(): array
     {
         return [
@@ -68,133 +67,136 @@ final class ExportXlsTest extends TestCase
         ];
     }
 
-    /**
-     * Configuración que se ejecuta antes de cada método de prueba.
-     */
     protected function setUp(): void
     {
-        parent::setUp(); // Ejecuta el setUp de la clase TestCase padre
-        $this->user = $this->createAuthenticatedUser(); // Crea un usuario usando el método de la clase padre
-        $this->actingAs($this->user); // Autentica al usuario para las solicitudes HTTP de la prueba
+        parent::setUp();
+        $this->user = $this->createAuthenticatedUser();
+        $this->actingAs($this->user);
     }
 
-    /**
-     * Verifica la generación del reporte XLS por defecto y la validación de su contenido.
-     */
-    public function testDefaultReportXlsGenerationAndContentValidation(): void // <--- NOMBRE DEL MÉTODO CAMBIADO
+    public function testDefaultReportXlsGenerationAndContentValidation(): void
     {
-        $endpointUrl = '/api/v1/data/export/xls/default-report'; // URL de tu endpoint
-        $requestData = $this->getReportRequestBodyData();        // Obtiene los datos JSON para la solicitud
+        $endpointUrl = '/api/v1/data/export/xls/default-report';     
+        $requestData = $this->getReportRequestBodyData();
 
-        // Realiza la solicitud GET a la API con un cuerpo JSON
         $response = $this->json('GET', $endpointUrl, $requestData, [
-            'Accept' => 'application/json', // Indica que esperamos una respuesta JSON
+            'Accept' => 'application/json', 
         ]);
 
-        // --- Parte 1: Verificar la respuesta JSON de la API ---
-        $response->assertStatus(200); // Verificar que el código de estado sea 200 OK
-        $response->assertHeader('Content-Type', 'application/json'); // Verificar que la respuesta sea JSON
-        
-        // Verificar la estructura básica del JSON de respuesta
-        $response->assertJsonStructure([
-            'message',
-            'filename',
-            'path'
-        ]);
-
-        // Verificar el mensaje de éxito específico (ajusta si el mensaje de tu API es diferente)
-        $response->assertJson([
-            'message' => 'File successfully saved with simple 2D LINE chart test!', 
-        ]);
-
-        // Obtener los datos de la respuesta JSON para usarlos después
+        $response->assertStatus(200); 
+        $response->assertHeader('Content-Type', 'application/json'); 
+        $response->assertJsonStructure(['message', 'filename', 'path']);
+        $response->assertJson(['message' => 'File saved. Added setIncludeCharts(true).']); 
         $responseData = $response->json(); 
-
-        // Verificar patrones en el nombre del archivo
-        $this->assertStringStartsWith('default_report_LINE_CHART_TEST_', $responseData['filename']);
-        $this->assertStringEndsWith('.xlsx', $responseData['filename']); // Asegúrate que sea .xlsx
-
-        // Verificar que la ruta del archivo no esté vacía y contenga el nombre del archivo
+        $this->assertStringStartsWith('default_report_INCLUDE_CHARTS_TEST_', $responseData['filename']);
+        $this->assertStringEndsWith('.xlsx', $responseData['filename']);
         $this->assertNotEmpty($responseData['path']);
         $this->assertStringContainsString($responseData['filename'], $responseData['path']);
 
-        // --- Parte 2: Verificar el archivo Excel generado en el servidor ---
-        $serverFilePath = $responseData['path']; // Ruta del archivo en el servidor
+        $serverFilePath = $responseData['path'];
+        $this->assertFileExists($serverFilePath, "El archivo Excel no fue encontrado en la ruta del servidor: {$serverFilePath}");
 
-        // Verificar que el archivo realmente existe en la ruta proporcionada
-        $this->assertFileExists($serverFilePath, "El archivo Excel no fue encontrado en la ruta del servidor: " . $serverFilePath);
-
-        // Intentar leer el archivo Excel y verificar su contenido
         try {
             $spreadsheet = IOFactory::load($serverFilePath);
-            $sheet = $spreadsheet->getActiveSheet(); // Obtener la primera hoja (o la hoja activa)
+            $sheet = $spreadsheet->getSheetByName('default_report');
+            $this->assertNotNull($sheet, "La hoja 'default_report' no fue encontrada en el Excel.");
 
-            // ---- VALIDACIONES DEL CONTENIDO DE LAS TABLAS EN EL EXCEL ----
-            // ¡¡¡ESTA SECCIÓN ES LA QUE MÁS NECESITAS PERSONALIZAR!!!
-            // Basado en las capturas que me enviaste y tu JSON de entrada.
-
-            // Validación de la tabla "Date" / "Balance" (primera captura)
-            $this->assertEquals('Date', $sheet->getCell('A1')->getValue(), "Cabecera A1 para 'Date' no coincide.");
-            $this->assertEquals('Balance', $sheet->getCell('B1')->getValue(), "Cabecera B1 para 'Balance' no coincide.");
-
-            $expectedDatesInExcel = ["Ene", "Feb", "Mar", "Abr", "May"]; 
-            for ($i = 0; $i < count($expectedDatesInExcel); $i++) {
-                $excelRow = $i + 2; // Los datos comienzan en la fila 2
-                $this->assertEquals(
-                    $expectedDatesInExcel[$i], 
-                    $sheet->getCell('A' . $excelRow)->getValue(), 
-                    "Contenido de Excel: Fecha en celda A{$excelRow} no coincide."
-                );
-                // El fallo que tuviste (100 vs 1000) indica que esta aserción es importante:
-                $this->assertEquals(
-                    (float) $requestData['chartBalanceValues'][$i+1][0], 
-                    (float) $sheet->getCell('B' . $excelRow)->getValue(), 
-                    "Contenido de Excel: Balance en celda B{$excelRow} no coincide." // Mensaje de error personalizado
-                );
+            $this->assertEquals('Date', $sheet->getCell('A1')->getValue(), "Excel: Cabecera A1 Date");
+            $this->assertEquals('Balance', $sheet->getCell('B1')->getValue(), "Excel: Cabecera B1 Balance");
+            $expectedChartDataSourceDates = ["Ene", "Feb", "Mar", "Abr", "May"];
+            $expectedChartDataSourceBalances = [100, 150, 120, 180, 160];
+            for ($i = 0; $i < count($expectedChartDataSourceDates); $i++) {
+                $excelRow = $i + 2;
+                $this->assertEquals($expectedChartDataSourceDates[$i], $sheet->getCell('A' . $excelRow)->getValue(), "Excel: Chart Date A{$excelRow}");
+                $this->assertEquals($expectedChartDataSourceBalances[$i], (float) $sheet->getCell('B' . $excelRow)->getValue(), "Excel: Chart Balance B{$excelRow}");
             }
 
-            // Validación de la tabla "Account balances"
-            // ¡¡AJUSTA ESTAS COORDENADAS SEGÚN TU ARCHIVO REAL!!
-            $this->assertEquals('Account balances', $sheet->getCell('C30')->getValue(), "Contenido de Excel: Título de tabla 'Account balances'"); // Asumiendo C30
-            $this->assertEquals('Name', $sheet->getCell('B31')->getValue(), "Contenido de Excel: Cabecera 'Name' (B31) para Account balances no coincide.");
-            $this->assertEquals('Balance at start of period', $sheet->getCell('C31')->getValue(), "Contenido de Excel: Cabecera 'Balance at start...' (C31) no coincide.");
-            // ... (más cabeceras de Account Balances)
+            $currentRowInExcel = 30;
 
-            $accountBalancesData = $requestData['accountBalancesTableData'];
-            $startDataRowForAccounts = 32; // ¡AJUSTA ESTA FILA!
-
-            // Si tu API actualmente escribe "No data available...", entonces esta aserción fallará.
-            // Si quieres que la prueba pase AHORA, tendrías que hacer:
-            // $this->assertEquals("No data available for this table.", $sheet->getCell('B'.$startDataRowForAccounts)->getValue());
-            // Pero es MEJOR dejar la aserción con los datos esperados para que la prueba te indique
-            // que tu API aún no está poblando los datos.
-            foreach ($accountBalancesData as $rowIndex => $rowData) {
-                $currentExcelRow = $startDataRowForAccounts + $rowIndex;
-                $this->assertEquals($rowData[0], $sheet->getCell('B' . $currentExcelRow)->getValue(), "Contenido de Excel: Account Name en B{$currentExcelRow} no coincide.");
-                $this->assertEquals((float) $rowData[1], (float) $sheet->getCell('C' . $currentExcelRow)->getValue(), "Contenido de Excel: Account Start Balance en C{$currentExcelRow} no coincide.");
-                $this->assertEquals((float) $rowData[2], (float) $sheet->getCell('D' . $currentExcelRow)->getValue(), "Contenido de Excel: Account End Balance en D{$currentExcelRow} no coincide.");
-                $this->assertEquals((float) $rowData[3], (float) $sheet->getCell('E' . $currentExcelRow)->getValue(), "Contenido de Excel: Account Difference en E{$currentExcelRow} no coincide.");
-            }
+            // La forma en que definiste la closure con `use ($sheet, $requestData, &$currentRowInExcel, $this)`
+            // ES la forma correcta de hacer que $this (la instancia de ExportXlsTest) esté disponible.
+            // Si tu IDE sigue marcando "Cannot use $this as lexical variable" puede ser una
+            // configuración del linter del IDE o una falsa alarma, o una versión de PHP muy antigua
+            // donde esto era más problemático (pero con PHP 7+ y `use ($this)` debería estar bien).
+            // Vamos a asegurarnos que el $this que pasas se usa correctamente.
+            // Renombraré la variable local $this a $testInstance para evitar cualquier ambigüedad para el linter.
             
-            // ... Continúa con este patrón para validar las OTRAS TABLAS ...
-            // Para cada tabla: identifica celda de inicio, verifica cabeceras, itera y verifica datos.
+            $testInstance = $this; // Capturamos $this en una variable local
 
-            // Puedes dejar esto o quitarlo si ya tienes suficientes aserciones
-            // $this->markTestIncomplete(
-            //    'Completar las validaciones para todas las tablas y sus datos en el archivo Excel.'
-            // );
+            $validateTable = function(
+                string $tableKeyInRequest, 
+                string $tableTitleInExcel, 
+                array $tableHeadersInExcel,
+                bool $hasTotalRow = false
+            ) use ($sheet, $requestData, &$currentRowInExcel, $testInstance) { // Usamos $testInstance
+
+                $tableDataFromRequest = $requestData[$tableKeyInRequest] ?? [];
+
+                // Usamos $testInstance para llamar a los métodos de aserción
+                $testInstance->assertEquals($tableTitleInExcel, $sheet->getCell('A' . $currentRowInExcel)->getValue(), "Excel: Título Tabla '{$tableTitleInExcel}' en A{$currentRowInExcel}");
+                $currentRowInExcel++; 
+
+                foreach ($tableHeadersInExcel as $colIndex => $header) {
+                    $colLetter = Coordinate::stringFromColumnIndex($colIndex + 1);
+                    $testInstance->assertEquals($header, $sheet->getCell($colLetter . $currentRowInExcel)->getValue(), "Excel: '{$tableTitleInExcel}' Cabecera '{$header}'");
+                }
+                $currentRowInExcel++; 
+
+                if (empty($tableDataFromRequest)) {
+                    $testInstance->assertEquals('No data available for this table.', $sheet->getCell('A' . $currentRowInExcel)->getValue(), "Excel: '{$tableTitleInExcel}' mensaje 'No data'.");
+                    $currentRowInExcel++; 
+                } else {
+                    foreach ($tableDataFromRequest as $rowIndex => $rowData) {
+                        $excelDataRow = $currentRowInExcel + $rowIndex;
+                        foreach ($rowData as $cellIndex => $cellValue) {
+                            if ($cellIndex < count($tableHeadersInExcel)) {
+                                $colLetter = Coordinate::stringFromColumnIndex($cellIndex + 1);
+                                $actualCellValue = $sheet->getCell($colLetter . $excelDataRow)->getValue();
+                                if (is_numeric($cellValue) && !is_string($cellValue)) {
+                                    $testInstance->assertEquals((float) $cellValue, (float) $actualCellValue, "Excel: '{$tableTitleInExcel}' R{$rowIndex}C{$cellIndex} ({$colLetter}{$excelDataRow})");
+                                } else {
+                                    $testInstance->assertEquals($cellValue, $actualCellValue, "Excel: '{$tableTitleInExcel}' R{$rowIndex}C{$cellIndex} ({$colLetter}{$excelDataRow})");
+                                }
+                            }
+                        }
+                    }
+                    $currentRowInExcel += count($tableDataFromRequest); 
+                }
+
+                if ($hasTotalRow) {
+                    $totalLabelColLetter = Coordinate::stringFromColumnIndex(max(1, count($tableHeadersInExcel) -1));
+                    $totalValueColLetter = Coordinate::stringFromColumnIndex(count($tableHeadersInExcel));
+                    $expectedSumTotal = 0;
+                    foreach ($tableDataFromRequest as $dataRow) {
+                        if (count($dataRow) == count($tableHeadersInExcel) && is_numeric(end($dataRow))) {
+                             $expectedSumTotal += (float) end($dataRow);   
+                        } else if (count($dataRow) == 1 && is_numeric($dataRow[0]) && count($tableHeadersInExcel) == 2) {
+                            $expectedSumTotal += (float) $dataRow[0];
+                        }
+                    }
+                    if (count($tableHeadersInExcel) > 1) {
+                        $testInstance->assertEquals("Total", $sheet->getCell($totalLabelColLetter . $currentRowInExcel)->getValue(), "Excel: '{$tableTitleInExcel}' Etiqueta Total");
+                        $testInstance->assertEquals($expectedSumTotal, (float) $sheet->getCell($totalValueColLetter . $currentRowInExcel)->getValue(), "Excel: '{$tableTitleInExcel}' Valor Total");
+                    } else { 
+                         $testInstance->assertStringContainsString("Total: " . $expectedSumTotal, $sheet->getCell($totalValueColLetter . $currentRowInExcel)->getValue(), "Excel: '{$tableTitleInExcel}' Etiqueta y Valor Total");
+                    }
+                    $currentRowInExcel++;
+                }
+                $currentRowInExcel++; 
+            };
+
+            // Llamadas a $validateTable (sin cambios)
+            $validateTable('accountBalancesTableData', "Account balances", ["Name", "Balance at start of period", "Balance at end of period", "Difference"]);
+            $validateTable('incomeVsExpensesTableData', "Income vs Expenses", ["Currency", "In", "Out", "Difference"]);
+            $validateTable('revenueIncomeTableData', "Revenue/Income", ["Name", "Total", "Average"]);
+            $validateTable('expensesTableData', "Expenses", ["Name", "Total", "Average"]);
+            $validateTable('budgetsTableData', "Budgets", ["Budget", "Date", "Budgeted", "pct (%)", "Spent", "pct (%)", "Left", "Overspent"]);
+            $validateTable('categoriesTableData', "Categories", ["Category", "Spent", "Earned", "Sum"]);
+            $validateTable('budgetSplitAccountTableData', "Budget (split by account)", ["Budget", "Sum"], true);
+            $validateTable('subscriptionsTableData', "Subscriptions", ["Name", "Minimum amount", "Maximum amount", "Expected on", "Paid"]);
 
         } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
             $this->fail("Error al leer el archivo Excel desde el servidor: " . $e->getMessage() . " en la ruta: " . $serverFilePath);
         }
-        /* // Opcional: Bloque finally para limpiar el archivo generado después de la prueba
-        finally {
-            if (isset($serverFilePath) && file_exists($serverFilePath)) {
-                unlink($serverFilePath); // Elimina el archivo
-            }
-        }
-        */
     }
-
-    // (El método createAuthenticatedUser se hereda de Tests\integration\TestCase)
 }
