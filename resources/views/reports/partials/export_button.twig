@@ -1,0 +1,17 @@
+<div class="btn-group pull-right" style="margin-bottom: 15px;">
+    <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+        <span class="fa fa-download"></span> {{ 'export'|_ }} <span class="caret"></span>
+    </button>
+    <ul class="dropdown-menu">
+        <li>
+            <a href="#" id="exportXlsLink" class="dropdown-item">
+                <span class="fa fa-file-excel"></span> {{ 'export_as_xls'|_ }}
+            </a>
+        </li>
+        <li>
+            <a href="{{ exportPdfUrl | default('#') }}" class="dropdown-item">
+                <span class="fa fa-file-pdf"></span> {{ 'export_as_pdf'|_ }}
+            </a>
+        </li>
+    </ul>
+</div>

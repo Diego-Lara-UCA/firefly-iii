@@ -343,7 +343,7 @@ function multiCurrencyPieChart(URL, container) {
  * @param chartType
  * @param options
  * @param colorData
- * @param today
+ * @param today  // Este parámetro no se usa en la función, pero está en el JSDoc.
  */
 function drawAChart(URL, container, chartType, options, colorData) {
     var containerObj = $('#' + container);
@@ -390,6 +390,12 @@ function drawAChart(URL, container, chartType, options, colorData) {
             allCharts[container].data.datasets = data.datasets;
             allCharts[container].data.labels = data.labels;
             allCharts[container].update();
+            
+            // Si el gráfico ya existe y se actualiza, también actualizar la referencia global si es el gráfico correcto
+            if (container === 'account-balances-chart') {
+                window.accountBalancesChart = allCharts[container];
+                console.log('window.accountBalancesChart updated:', window.accountBalancesChart);
+            }
         } else {
             // new chart!
             var ctx = document.getElementById(container).getContext("2d");
@@ -428,6 +434,12 @@ function drawAChart(URL, container, chartType, options, colorData) {
                 }
             }
             allCharts[container] = new Chart(ctx, chartOpts);
+
+            // Asignación específica para el gráfico de saldos de cuenta cuando se crea por primera vez
+            if (container === 'account-balances-chart') {
+                window.accountBalancesChart = allCharts[container];
+                console.log('window.accountBalancesChart assigned (new):', window.accountBalancesChart);
+            }
         }
 
     }).fail(function () {
