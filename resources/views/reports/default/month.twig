@@ -256,16 +256,17 @@
                 headerRow.push($(this).text().trim());
             });
 
-            if (headerRow.length > 0) {
-                if (tableContainerId === 'budgetReport' && headerRow.length === 9 && headerRow[6] === "") {
-                    // console.log(`[${tableContainerId}] Cabecera original:`, JSON.stringify(headerRow));
-                    headerRow.splice(6, 1); 
-                    // console.log(`[${tableContainerId}] Cabecera modificada:`, JSON.stringify(headerRow));
-                }
-                data.push(headerRow);
-            } else {
-                console.warn(`[${tableContainerId}] No se pudo determinar la cabecera de la tabla.`);
-            }
+            // MODIFICACIÓN: No añadir la cabecera desde el frontend si el backend ya las maneja.
+            // if (headerRow.length > 0) {
+            //     if (tableContainerId === 'budgetReport' && headerRow.length === 9 && headerRow[6] === "") {
+            //         // console.log(`[${tableContainerId}] Cabecera original:`, JSON.stringify(headerRow));
+            //         headerRow.splice(6, 1); 
+            //         // console.log(`[${tableContainerId}] Cabecera modificada:`, JSON.stringify(headerRow));
+            //     }
+            //     data.push(headerRow); // Comentado o eliminado para no enviar cabeceras desde el frontend
+            // } else {
+            //     console.warn(`[${tableContainerId}] No se pudo determinar la cabecera de la tabla.`);
+            // }
 
             // Procesar tbody y tfoot
             $table.find('tbody tr, tfoot tr').each(function(rowIndex) {
@@ -356,13 +357,13 @@
                 });
 
                 if (row.length > 0) {
-                    const actualHeaderRowForComparison = data.length > 0 ? data[0] : [];
-                    if (actualHeaderRowForComparison.length > 0 && row.length !== actualHeaderRowForComparison.length) {
+                    // const actualHeaderRowForComparison = data.length > 0 ? data[0] : []; // Ya no es necesario si no enviamos cabeceras
+                    // if (actualHeaderRowForComparison.length > 0 && row.length !== actualHeaderRowForComparison.length) {
                         // console.warn(`[${tableContainerId}${isInTfoot ? ' tfoot' : ''}] Discrepancia en columnas para fila ${rowIndex}: Cabecera tiene ${actualHeaderRowForComparison.length}, Fila de datos tiene ${row.length}. Cabecera:`, actualHeaderRowForComparison, `Datos:`, row);
-                    }
-                    if (!(data.length === 1 && row.every(cell => cell === "" || cell === null || typeof cell === 'undefined'))) {
-                        data.push(row);
-                    }
+                    // }
+                    // if (!(data.length === 1 && row.every(cell => cell === "" || cell === null || typeof cell === 'undefined'))) { // Esta lógica podría necesitar ajuste si la primera fila ahora es de datos
+                    data.push(row);
+                    // }
                 }
             });
             return data;
@@ -377,8 +378,8 @@
             $exportButton.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
 
             const exportData = {
-                chartDateLabels: [['Fecha']],
-                chartBalanceValues: [['Saldo ($)']], 
+                chartDateLabels: [], // Modificado: Inicializar como array vacío
+                chartBalanceValues: [], // Modificado: Inicializar como array vacío
                 accountBalancesTableData: [],
                 incomeVsExpensesTableData: [],
                 revenueIncomeTableData: [],
@@ -396,6 +397,7 @@
 
                 if (chartLabels && chartLabels.length > 0) {
                     // Usar etiquetas del gráfico si están disponibles
+                    // No se añade cabecera explícita para chartDateLabels aquí; se asume que el backend la maneja.
                     chartLabels.forEach((label, index) => { 
                         console.log(`[Chart Label ${index}] Original:`, label, typeof label); // Añadir typeof label
 
@@ -413,7 +415,7 @@
                     if (datasets && datasets.length > 0 && datasets[0].data && datasets[0].data.length > 0) {
                         // Si hay datos en el dataset, usarlos
                         if (datasets[0].label) { 
-                            exportData.chartBalanceValues[0] = [datasets[0].label];
+                            exportData.chartBalanceValues.push([datasets[0].label]); // Modificado: Usar push para añadir la etiqueta del dataset como cabecera
                         }
                         datasets[0].data.forEach(value => {
                             // Asegurarse de que los valores de saldo sean números si es necesario,
@@ -424,12 +426,13 @@
                     } else {
                         // Hay etiquetas pero no valores de datos, rellenar con ceros
                         if (datasets && datasets.length > 0 && datasets[0].label) { 
-                            exportData.chartBalanceValues[0] = [datasets[0].label];
+                            exportData.chartBalanceValues.push([datasets[0].label]); // Modificado: Usar push para añadir la etiqueta del dataset como cabecera
                         }
                         chartLabels.forEach(() => exportData.chartBalanceValues.push([0]));
                     }
                 } else {
                     // No hay etiquetas del gráfico, usar fechas de inicio/fin del informe
+                    // No se añaden cabeceras explícitas aquí; se asume que el backend las maneja.
                     console.warn('El gráfico no tiene etiquetas. Usando fechas de inicio/fin del informe para chartDateLabels.');
                     const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD"); // Asume que startDate es YYYYMMDD
                     exportData.chartDateLabels.push([formattedStartDate]);
@@ -443,6 +446,7 @@
                 }
             } else {
                 // window.accountBalancesChart no está definido o no tiene .data
+                // No se añaden cabeceras explícitas aquí; se asume que el backend las maneja.
                 console.warn('window.accountBalancesChart no está definido o no tiene datos. Usando fallback para chartDateLabels y chartBalanceValues.');
                 const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD");
                 exportData.chartDateLabels.push([formattedStartDate]);
