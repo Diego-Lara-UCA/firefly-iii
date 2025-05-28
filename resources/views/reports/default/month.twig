@@ -175,6 +175,8 @@
 
         // URL para el endpoint de exportación XLS (generación del archivo)
         var exportXlsDefaultReportUrl = '{{ route('api.v1.data.export.xls.default-report') }}';
+        // URL para el endpoint de exportación PDF (generación del archivo)
+        var exportPdfDefaultReportUrl = '{{ route('api.v1.data.export.pdf.default-report') }}';
         // No necesitamos la URL de descarga si no vamos a descargar
 
     </script>
@@ -369,17 +371,17 @@
             return data;
         }
 
-        function collectAndTriggerExport() { 
+        function collectAndTriggerExport(exportType) { 
             if (dataCollectionAttempted) return;
             dataCollectionAttempted = true;
 
-            const $exportButton = $('#exportXlsLink');
+            const $exportButton = exportType === 'xls' ? $('#exportXlsLink') : $('#exportPdfLink');
             var originalText = $exportButton.html();
             $exportButton.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
 
             const exportData = {
-                chartDateLabels: [], // Modificado: Inicializar como array vacío
-                chartBalanceValues: [], // Modificado: Inicializar como array vacío
+                chartDateLabels: [],
+                chartBalanceValues: [],
                 accountBalancesTableData: [],
                 incomeVsExpensesTableData: [],
                 revenueIncomeTableData: [],
@@ -391,65 +393,136 @@
             };
 
             if (typeof window.accountBalancesChart !== 'undefined' && window.accountBalancesChart.data) {
-                const chartInstance = window.accountBalancesChart; // Para facilitar la lectura
+                const chartInstance = window.accountBalancesChart;
                 const chartLabels = chartInstance.data.labels;
                 const datasets = chartInstance.data.datasets;
 
-                if (chartLabels && chartLabels.length > 0) {
-                    // Usar etiquetas del gráfico si están disponibles
-                    // No se añade cabecera explícita para chartDateLabels aquí; se asume que el backend la maneja.
-                    chartLabels.forEach((label, index) => { 
-                        console.log(`[Chart Label ${index}] Original:`, label, typeof label); // Añadir typeof label
+                // --- INICIO DE LOGS Y LÓGICA MEJORADA PARA GRÁFICOS ---
+                console.log('[Chart Data Extraction] Intentando extraer datos del gráfico.');
+                console.log('[Chart Data Extraction] chartInstance.data.labels:', chartLabels);
+                
+                // Loguear información de TODOS los datasets
+                if (datasets && datasets.length > 0) {
+                    console.log(`[Chart Data Extraction] Número total de datasets: ${datasets.length}`);
+                    datasets.forEach((dataset, i) => {
+                        console.log(`[Chart Data Extraction] ---- Dataset Index: ${i} ----`);
+                        console.log(`[Chart Data Extraction] datasets[${i}].label:`, dataset.label);
+                        console.log(`[Chart Data Extraction] datasets[${i}].data (referencia directa):`, dataset.data);
+                        if (dataset.data && typeof dataset.data === 'object') {
+                            console.log(`[Chart Data Extraction] typeof datasets[${i}].data:`, typeof dataset.data);
+                            if (Array.isArray(dataset.data)) {
+                                console.log(`[Chart Data Extraction] datasets[${i}].data.length:`, dataset.data.length);
+                                console.log(`[Chart Data Extraction] datasets[${i}].data[0]:`, dataset.data[0]); // Primer elemento como ejemplo
+                            }
+                        }
+                        console.log(`[Chart Data Extraction] ---- Fin Dataset Index: ${i} ----`);
+                    });
+                } else {
+                    console.log('[Chart Data Extraction] No se encontraron datasets en el gráfico.');
+                }
 
+                if (chartLabels && chartLabels.length > 0) {
+                    chartLabels.forEach((label, index) => {
                         const momentDate = moment(label, "MMMM Do, YYYY", "es");
-                        
-                        console.log(`[Chart Label ${index}] MomentDate Object:`, momentDate);
-                        console.log(`[Chart Label ${index}] Is Valid:`, momentDate.isValid());
-                        
                         const formattedLabel = momentDate.isValid() ? momentDate.format("YYYY-MM-DD") : label;
-                        console.log(`[Chart Label ${index}] Formatted:`, formattedLabel);
-                        
                         exportData.chartDateLabels.push([formattedLabel]);
                     });
 
-                    if (datasets && datasets.length > 0 && datasets[0].data && datasets[0].data.length > 0) {
-                        // Si hay datos en el dataset, usarlos
-                        if (datasets[0].label) { 
-                            exportData.chartBalanceValues.push([datasets[0].label]); // Modificado: Usar push para añadir la etiqueta del dataset como cabecera
+                    // --- IMPORTANTE: Determinar qué dataset es el relevante ---
+                    // Por ahora, seguimos asumiendo datasets[0], pero esto podría necesitar cambiar
+                    // basado en los logs de arriba.
+                    const relevantDatasetIndex = 1; // CAMBIA ESTO si los datos están en otro índice
+                    // -------------------------------------------------------------
+
+                    const hasRelevantDataset = datasets && datasets.length > relevantDatasetIndex && datasets[relevantDatasetIndex];
+                    let hasRelevantDatasetData = false;
+
+                    if (hasRelevantDataset) {
+                        const currentDataset = datasets[relevantDatasetIndex];
+                        console.log(`[Chart Data Extraction] Procesando datos del dataset[${relevantDatasetIndex}] ('${currentDataset.label}')`);
+                        console.log(`[Chart Data Extraction] datasets[${relevantDatasetIndex}].data (raw para procesamiento):`, currentDataset.data);
+
+                        if (currentDataset.data && (typeof currentDataset.data === 'function' || currentDataset.data.length > 0)) {
+                            if (typeof currentDataset.data === 'function') {
+                                const dynamicData = currentDataset.data();
+                                hasRelevantDatasetData = dynamicData && dynamicData.length > 0;
+                            } else {
+                                hasRelevantDatasetData = currentDataset.data.length > 0;
+                            }
                         }
-                        datasets[0].data.forEach(value => {
-                            // Asegurarse de que los valores de saldo sean números si es necesario,
-                            // aunque Chart.js usualmente los maneja como números.
-                            // El backend parece esperar números para los saldos.
-                            exportData.chartBalanceValues.push([parseFloat(value)]);
+                    }
+
+                    console.log(`[Chart Data Extraction] hasRelevantDataset (índice ${relevantDatasetIndex}):`, hasRelevantDataset);
+                    console.log(`[Chart Data Extraction] hasRelevantDatasetData (índice ${relevantDatasetIndex}, final check):`, hasRelevantDatasetData);
+
+                    if (hasRelevantDatasetData) {
+                        const currentDataset = datasets[relevantDatasetIndex];
+                        if (currentDataset.label) {
+                            exportData.chartBalanceValues.push([currentDataset.label]);
+                        }
+                        
+                        const dataArray = typeof currentDataset.data === 'function' ? currentDataset.data() : currentDataset.data;
+
+                        dataArray.forEach(point => {
+                            let rawValue = point;
+                            if (typeof point === 'object' && point !== null && typeof point.y !== 'undefined') {
+                                rawValue = point.y;
+                            }
+                            const valueAsString = (rawValue === null || typeof rawValue === 'undefined') ? "" : String(rawValue);
+                            const normalizedValue = normalizeCurrencyString(valueAsString);
+                            let numericValue = parseFloat(normalizedValue);
+                            if (isNaN(numericValue)) {
+                                numericValue = 0; 
+                            }
+                            exportData.chartBalanceValues.push([numericValue]);
                         });
                     } else {
-                        // Hay etiquetas pero no valores de datos, rellenar con ceros
-                        if (datasets && datasets.length > 0 && datasets[0].label) { 
-                            exportData.chartBalanceValues.push([datasets[0].label]); // Modificado: Usar push para añadir la etiqueta del dataset como cabecera
+                        console.warn('[Chart Data Extraction] No se encontraron datos válidos en datasets[0].data o datasets está vacío. Rellenando con ceros.');
+                        if (hasDatasets && datasets[0] && datasets[0].label) {
+                            exportData.chartBalanceValues.push([datasets[0].label]);
                         }
-                        chartLabels.forEach(() => exportData.chartBalanceValues.push([0]));
+                        // Rellenar con ceros basado en el número de etiquetas
+                        const numLabels = exportData.chartDateLabels.length > 0 ? exportData.chartDateLabels.length : (chartLabels ? chartLabels.length : 1);
+                        for (let i = 0; i < numLabels; i++) {
+                            if (exportData.chartBalanceValues.length === 0 && i === 0 && !(hasDatasets && datasets[0] && datasets[0].label)) {
+                                // Si no hay etiqueta de dataset y es el primer valor, no añadir nada extra
+                            } else if (exportData.chartBalanceValues.length === 0 && i === 0 && (hasDatasets && datasets[0] && datasets[0].label)) {
+                                // La etiqueta ya se añadió, este es el primer valor de datos
+                                exportData.chartBalanceValues.push([0]);
+                            }
+                            else {
+                                exportData.chartBalanceValues.push([0]);
+                            }
+                        }
+                         // Asegurar que haya al menos una etiqueta y un valor si todo falla
+                        if (exportData.chartBalanceValues.length === 0) {
+                            exportData.chartBalanceValues.push(["No Label"]);
+                            exportData.chartBalanceValues.push([0]);
+                        } else if (exportData.chartBalanceValues.length === 1 && (hasDatasets && datasets[0] && datasets[0].label)) {
+                            // Solo se añadió la etiqueta, añadir un 0 para datos
+                             exportData.chartBalanceValues.push([0]);
+                        }
                     }
                 } else {
-                    // No hay etiquetas del gráfico, usar fechas de inicio/fin del informe
-                    // No se añaden cabeceras explícitas aquí; se asume que el backend las maneja.
-                    console.warn('El gráfico no tiene etiquetas. Usando fechas de inicio/fin del informe para chartDateLabels.');
-                    const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD"); // Asume que startDate es YYYYMMDD
+                    console.warn('[Chart Data Extraction] El gráfico no tiene etiquetas (chartLabels). Usando fechas de inicio/fin del informe para chartDateLabels y ceros para valores.');
+                    const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD");
                     exportData.chartDateLabels.push([formattedStartDate]);
-                    exportData.chartBalanceValues.push([0]); 
+                    exportData.chartBalanceValues.push(["Default Data"]); // Etiqueta por defecto
+                    exportData.chartBalanceValues.push([0]);
 
                     if (startDate !== endDate) {
-                        const formattedEndDate = moment(endDate, "YYYYMMDD").format("YYYY-MM-DD"); // Asume que endDate es YYYYMMDD
+                        const formattedEndDate = moment(endDate, "YYYYMMDD").format("YYYY-MM-DD");
                         exportData.chartDateLabels.push([formattedEndDate]);
-                        exportData.chartBalanceValues.push([0]); 
+                        exportData.chartBalanceValues.push([0]); // Un valor cero correspondiente a la etiqueta de fin
                     }
                 }
+                // --- FIN DE LOGS Y LÓGICA MEJORADA PARA GRÁFICOS ---
+
             } else {
-                // window.accountBalancesChart no está definido o no tiene .data
-                // No se añaden cabeceras explícitas aquí; se asume que el backend las maneja.
-                console.warn('window.accountBalancesChart no está definido o no tiene datos. Usando fallback para chartDateLabels y chartBalanceValues.');
+                console.warn('[Chart Data Extraction] window.accountBalancesChart no está definido o no tiene .data. Usando fallback para chartDateLabels y chartBalanceValues.');
                 const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD");
                 exportData.chartDateLabels.push([formattedStartDate]);
+                exportData.chartBalanceValues.push(["Default Data"]);
                 exportData.chartBalanceValues.push([0]);
 
                 if (startDate !== endDate) {
@@ -470,26 +543,29 @@
 
             console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
 
+            const exportUrl = exportType === 'xls' ? exportXlsDefaultReportUrl : exportPdfDefaultReportUrl;
+            const fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+
             $.ajax({
-                url: exportXlsDefaultReportUrl,
+                url: exportUrl,
                 type: 'POST', 
                 contentType: 'application/json; charset=utf-8', 
                 data: JSON.stringify(exportData), 
                 dataType: 'json', 
                 success: function(response) {
                     if (response.filename && response.path) {
-                        console.log('Informe generado en el servidor:', response.filename, 'en la ruta:', response.path);
-                        alert('El informe XLS se ha generado en el servidor.');
+                        console.log(`Informe ${fileTypeMessage} generado en el servidor:`, response.filename, 'en la ruta:', response.path);
+                        alert(`El informe ${fileTypeMessage} se ha generado en el servidor.`);
                     } else {
                         console.error('Respuesta inesperada del servidor:', response);
-                        alert('Error: El servidor no devolvió la información del archivo esperada.');
+                        alert(`Error: El servidor no devolvió la información del archivo ${fileTypeMessage} esperada.`);
                     }
                 },
                 error: function(jqXHR, textStatus, errorThrown) {
                     // El error "Undefined array key chartDateLabels" sugiere que el backend NO está recibiendo el cuerpo
                     // o no lo está procesando como esperas para una petición GET.
-                    console.error('Error en la generación del XLS:', textStatus, errorThrown, jqXHR.responseText);
-                    alert('Error al generar el informe XLS. Consulta la consola para más detalles.');
+                    console.error(`Error en la generación del ${fileTypeMessage}:`, textStatus, errorThrown, jqXHR.responseText);
+                    alert(`Error al generar el informe ${fileTypeMessage}. Consulta la consola para más detalles.`);
                 },
                 complete: function() {
                     $exportButton.removeClass('disabled').prop('disabled', false).html(originalText);
@@ -509,23 +585,40 @@
                         return;
                     }
                     dataCollectionAttempted = false; 
-                    collectAndTriggerExport(); // Llamar a la función renombrada
+                    collectAndTriggerExport('xls'); 
                 });
-                console.log("Manejador de clic para procesamiento XLS adjuntado después de ajaxStop.");
+
+                $('#exportPdfLink').off('click').on('click', function(e) {
+                    e.preventDefault();
+                    if ($(this).hasClass('disabled')) {
+                        return;
+                    }
+                    dataCollectionAttempted = false; 
+                    collectAndTriggerExport('pdf');
+                });
+                console.log("Manejadores de clic para procesamiento XLS y PDF adjuntados después de ajaxStop.");
             }
         });
         
         $(document).ready(function() {
             setTimeout(function() {
                 if (!initialAjaxCompleted) {
-                     console.warn("ajaxStop no se disparó, adjuntando manejador de clic para XLS directamente.");
+                     console.warn("ajaxStop no se disparó, adjuntando manejador de clic para XLS y PDF directamente.");
                      $('#exportXlsLink').off('click').on('click', function(e) {
                         e.preventDefault();
                         if ($(this).hasClass('disabled')) {
                             return;
                         }
                         dataCollectionAttempted = false;
-                        collectAndTriggerExport();
+                        collectAndTriggerExport('xls');
+                    });
+                    $('#exportPdfLink').off('click').on('click', function(e) {
+                        e.preventDefault();
+                        if ($(this).hasClass('disabled')) {
+                            return;
+                        }
+                        dataCollectionAttempted = false;
+                        collectAndTriggerExport('pdf');
                     });
                 }
             }, 2000);
