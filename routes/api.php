@@ -1005,8 +1005,8 @@ Route::group(
         'as'        => 'api.v1.data.export.xls.',
     ],
     static function (): void {
-        Route::post('default-report', ['uses' => 'ReportExportController@DefaultReport', 'as' => 'default-report']);
-        Route::post('transaction-history-report', ['uses' => 'ReportExportController@TransactionHistoryReport', 'as' => 'transaction-history-report']);
-        Route::post('budget-report', ['uses' => 'ReportExportController@BudgetReport', 'as' => 'budget-report']);
+        Route::get('default-report', ['uses' => 'ReportExportController@DefaultReport', 'as' => 'default-report']);
+        Route::get('transaction-history-report', ['uses' => 'ReportExportController@TransactionHistoryReport', 'as' => 'transaction-history-report']);
+        Route::get('budget-report', ['uses' => 'ReportExportController@BudgetReport', 'as' => 'budget-report']);
     }
 );
