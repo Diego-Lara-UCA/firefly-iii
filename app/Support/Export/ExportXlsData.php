@@ -8,6 +8,9 @@ use FireflyIII\Exceptions\FireflyException;
 use FireflyIII\Api\V1\Requests\Data\Export\DefaultReportExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\TransactionHistoryExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\BudgetExportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\CategoryReportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\TagReportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\ExpenseRevenueReportRequest;
 
 use Carbon\Carbon;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -33,26 +36,24 @@ class ExportXlsData {
     private function addSimplePieChart(
         Worksheet $sheet,
         string $chartNameInternal,
-        array $dataLabels,          // Array de DataSeriesValues para las etiquetas/categorías
-        array $dataValues,          // Array de DataSeriesValues para los valores
+        array $dataLabels,
+        array $dataValues,
         string $topLeftPosition,
         string $bottomRightPosition,
         ?string $chartTitleText = null
     ): void {
-        // Para gráficos de pastel, las etiquetas (dataLabels) se usan a menudo para la leyenda y las categorías.
-        // Los valores (dataValues) son los datos numéricos.
         $series = new DataSeries(
-            DataSeries::TYPE_PIECHART,      // Tipo de gráfico: Pastel
-            null,                           // Agrupación (no aplica o es null para pastel)
+            DataSeries::TYPE_PIECHART,
+            null,
             range(0, count($dataValues) - 1),
-            $dataLabels,                    // Usado para las leyendas/etiquetas de las porciones
-            $dataLabels,                    // Usado también para las categorías/etiquetas de las porciones
+            $dataLabels,
+            $dataLabels,
             $dataValues
         );
 
         $plotArea = new PlotArea(null, [$series]);
         $chartTitleObj = $chartTitleText ? new ChartMainTitle($chartTitleText) : null;
-        $legendObj = new ChartLegend(ChartLegend::POSITION_RIGHT, null, false); // Mostrar leyenda
+        $legendObj = new ChartLegend(ChartLegend::POSITION_RIGHT, null, false);
 
         $chart = new Chart(
             $chartNameInternal,
@@ -70,27 +71,26 @@ class ExportXlsData {
     private function addSimpleBarChart(
         Worksheet $sheet,
         string $chartNameInternal,
-        array $seriesLegendLabels,  // Array de DataSeriesValues para la leyenda de la(s) serie(s)
-        array $xAxisCategories,     // Array de DataSeriesValues para las categorías del eje X
-        array $seriesValues,        // Array de DataSeriesValues para los valores Y de la(s) serie(s)
+        array $seriesLegendLabels,
+        array $xAxisCategories,
+        array $seriesValues,
         string $topLeftPosition,
         string $bottomRightPosition,
         ?string $chartTitleText = null,
-        ?string $yAxisTitleText = null // Nuevo: Título para el eje Y
+        ?string $yAxisTitleText = null
     ): void {
         $dataSeries = new DataSeries(
-            DataSeries::TYPE_BARCHART,      // Tipo de gráfico: Barras
-            DataSeries::GROUPING_STANDARD,  // O CLUSTERED si tienes múltiples series por categoría
+            DataSeries::TYPE_BARCHART,
+            DataSeries::GROUPING_STANDARD,
             range(0, count($seriesValues) - 1),
             $seriesLegendLabels,
             $xAxisCategories,
             $seriesValues
         );
-        // $dataSeries->setPlotDirection(DataSeries::DIRECTION_BAR); // Para barras horizontales, opcional
 
         $plotArea = new PlotArea(null, [$dataSeries]);
         $chartTitleObj = $chartTitleText ? new ChartMainTitle($chartTitleText) : null;
-        $yAxisTitleObj = $yAxisTitleText ? new ChartMainTitle($yAxisTitleText) : null; // Reutilizamos ChartMainTitle para ejes
+        $yAxisTitleObj = $yAxisTitleText ? new ChartMainTitle($yAxisTitleText) : null;
         $legendObj = new ChartLegend(ChartLegend::POSITION_TOPRIGHT, null, false);
 
         $chart = new Chart(
@@ -113,7 +113,6 @@ class ExportXlsData {
     /**
      * Create a simple line chart function
     */
-
     private function addSimpleLineChart(
         Worksheet $sheet,
         string $chartNameInternal,
@@ -147,6 +146,90 @@ class ExportXlsData {
         $chart->setTopLeftPosition($topLeftPosition);
         $chart->setBottomRightPosition($bottomRightPosition);
         $sheet->addChart($chart);
+    }
+
+    private function addMultiSeriesBarChart(
+    Worksheet $sheet,
+    string $chartNameInternal,
+    array $seriesLegendLabels,
+    array $xAxisCategories,
+    array $multiSeriesValues,
+    string $topLeftPosition,
+    string $bottomRightPosition,
+    ?string $chartTitleText = null
+    ): void {
+        // 1. Crear la Serie de Datos
+        $dataSeries = new DataSeries(
+            DataSeries::TYPE_BARCHART,
+            DataSeries::GROUPING_CLUSTERED,         // Agrupación: CLUSTERED para barras una al lado de la otra
+            range(0, count($multiSeriesValues) - 1),// Orden de las series (ej. [0, 1] para dos series)
+            $seriesLegendLabels,                    // Nombres para la leyenda (ej. "Ingresos", "Gastos")
+            $xAxisCategories,                       // Etiquetas del eje X (ej. "Ene", "Feb", "Mar")
+            $multiSeriesValues                      // Valores para cada serie
+        );
+
+        // Opcional: Para hacer las barras horizontales en lugar de columnas verticales, descomenta la siguiente línea:
+        // $dataSeries->setPlotDirection(DataSeries::DIRECTION_BAR);
+
+        // 2. Configurar el Área de Trazado, Leyenda y Título
+        $plotArea = new PlotArea(null, [$dataSeries]);
+        $chartTitleObj = $chartTitleText ? new ChartMainTitle($chartTitleText) : null;
+        $legendObj = new ChartLegend(ChartLegend::POSITION_TOPRIGHT, null, false);
+
+        // 3. Crear el Objeto Chart
+        $chart = new Chart(
+            $chartNameInternal,
+            $chartTitleObj,
+            $legendObj,
+            $plotArea
+        );
+        $chart->setPlotVisibleOnly(false);
+
+        // 4. Posicionar y Añadir el Gráfico a la Hoja
+        $chart->setTopLeftPosition($topLeftPosition);
+        $chart->setBottomRightPosition($bottomRightPosition);
+        $sheet->addChart($chart);
+    }
+
+    private function writeAndCreatePieChart(
+        Worksheet $mainSheet, Worksheet $dataSheet, string $dataSheetName, int &$dataSheetRow,
+        array $chartData, array &$pieChartPositions, int &$pieChartIndex, string $title
+    ): int {
+        $dataSourceHeaderRow = $dataSheetRow;
+
+        // --- CORRECCIÓN ---
+        // Generar letras de columna explícitamente en lugar de usar literales 'A' y 'B'.
+        $labelColLetter = Coordinate::stringFromColumnIndex(1); // 'A'
+        $valueColLetter = Coordinate::stringFromColumnIndex(2); // 'B'
+
+        $dataSheet->setCellValue($labelColLetter . $dataSourceHeaderRow, $chartData[0][0] ?? 'Label');
+        $dataSheet->setCellValue($valueColLetter . $dataSourceHeaderRow, $chartData[0][1] ?? 'Value');
+        
+        $num_points = 0;
+        for ($i = 1; $i < count($chartData); $i++) {
+            $sheetRow = $dataSourceHeaderRow + $i;
+            $dataSheet->setCellValue($labelColLetter . $sheetRow, $chartData[$i][0] ?? 'N/A');
+            $dataSheet->setCellValue($valueColLetter . $sheetRow, (float)($chartData[$i][1] ?? 0));
+            $num_points++;
+        }
+
+        if ($num_points > 0) {
+            $data_start_row = $dataSourceHeaderRow + 1;
+            $data_end_row = $dataSourceHeaderRow + $num_points;
+
+            // Usar las variables para construir las referencias de celda
+            $pieLabels = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $labelColLetter . "$" . $data_start_row . ":$" . $labelColLetter . "$" . $data_end_row, null, $num_points)];
+            $pieValues = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $data_start_row . ":$" . $valueColLetter . "$" . $data_end_row, null, $num_points)];
+            
+            $pos = $pieChartPositions[$pieChartIndex++];
+            $endCol = Coordinate::stringFromColumnIndex(Coordinate::columnIndexFromString($pos['col']) + 7);
+            
+            $this->addSimplePieChart($mainSheet, 'pieChart' . $pieChartIndex, $pieLabels, $pieValues, $pos['col'] . $pos['row'], $endCol . ($pos['row'] + 15), $title);
+            
+            return $data_end_row + 2;
+        }
+
+        return $dataSourceHeaderRow + 2;
     }
 
     /**
@@ -682,6 +765,398 @@ class ExportXlsData {
             $errorLine = $e->getLine();
             Log::error("Generic Exception in BudgetReport: {$errorMessage}\nTrace: {$errorTrace}\nFile: {$errorFile} Line: {$errorLine}");
             return response()->json(['error' => 'Error generating budget report.', 'details' => $errorMessage, 'file' => $errorFile, 'line' => $errorLine], 500);
+        }
+    }
+
+    public function GenerateCategoryReport(CategoryReportRequest $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validated();
+            $spreadsheet = new Spreadsheet();
+
+            $mainSheet = $spreadsheet->getActiveSheet();
+            $mainSheetName = 'CategoryReport';
+            $mainSheet->setTitle($mainSheetName);
+            $currentRow = 1;
+
+            $dataSheet = $spreadsheet->createSheet();
+            $dataSheetName = 'ChartDataSource';
+            $dataSheet->setTitle($dataSheetName);
+            $dataSheetRow = 1;
+
+            $this->createTable($mainSheet, $currentRow, "Accounts", ["Name", "Spent", "Earned", "Sum"], $validatedData['accountsTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Categories", ["Name", "Spent", "Earned", "Sum"], $validatedData['categoriesTableData'] ?? []);
+            $accountPerCategoryHeaders = $validatedData['accountPerCategoryTableHeaders'] ?? ['Name'];
+            $this->createTable($mainSheet, $currentRow, "Account per category", $accountPerCategoryHeaders, $validatedData['accountPerCategoryTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average expense per destination account", ["Account", "Spent (average)", "Total", "Transaction count"], $validatedData['avgExpenseDestAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average earning per source account", ["Account", "Earned (average)", "Total", "Transaction count"], $validatedData['avgEarningSourceAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Expenses (top 10)", ["Description", "Date", "Account", "Category", "Amount"], $validatedData['topExpensesTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Revenue / income (top 10)", ["Description", "Date", "Account", "Category", "Amount"], $validatedData['topRevenueTableData'] ?? []);
+            
+            $chartsStartRow = $currentRow + 1;
+            
+            $pieChartIndex = 0;
+            $pieChartPositions = [
+                ['row' => $chartsStartRow, 'col' => 'A'], ['row' => $chartsStartRow, 'col' => 'I'],
+                ['row' => $chartsStartRow + 17, 'col' => 'A'], ['row' => $chartsStartRow + 17, 'col' => 'I'],
+                ['row' => $chartsStartRow + 34, 'col' => 'A'], ['row' => $chartsStartRow + 34, 'col' => 'I'],
+                ['row' => $chartsStartRow + 51, 'col' => 'A'],
+            ];
+            $pieChartConfigs = [
+                ['dataKey' => 'expensePerCategoryChartData', 'title' => 'Expense per category'],
+                ['dataKey' => 'incomePerCategoryChartData', 'title' => 'Income per category'],
+                ['dataKey' => 'expensePerBudgetChartData', 'title' => 'Expense per budget'],
+                ['dataKey' => 'expensesPerSourceAccountChartData', 'title' => 'Expenses per source account'],
+                ['dataKey' => 'incomePerSourceAccountChartData', 'title' => 'Income per source account'],
+                ['dataKey' => 'expensesPerDestinationAccountChartData', 'title' => 'Expenses per destination account'],
+                ['dataKey' => 'incomePerDestinationAccountChartData', 'title' => 'Income per destination account'],
+            ];
+
+            foreach ($pieChartConfigs as $config) {
+                $chartData = $validatedData[$config['dataKey']] ?? [];
+                if (count($chartData) > 1) {
+                    $dataSourceHeaderRow = $dataSheetRow;
+                    
+                    $labelColLetter = Coordinate::stringFromColumnIndex(1); // 'A'
+                    $valueColLetter = Coordinate::stringFromColumnIndex(2); // 'B'
+
+                    $dataSheet->setCellValue($labelColLetter . $dataSourceHeaderRow, $chartData[0][0] ?? 'Label');
+                    $dataSheet->setCellValue($valueColLetter . $dataSourceHeaderRow, $chartData[0][1] ?? 'Value');
+                    
+                    $num_points = 0;
+                    for ($i = 1; $i < count($chartData); $i++) {
+                        $sheetRow = $dataSourceHeaderRow + $i;
+                        $dataSheet->setCellValue($labelColLetter . $sheetRow, $chartData[$i][0] ?? 'N/A');
+                        $dataSheet->setCellValue($valueColLetter . $sheetRow, (float)($chartData[$i][1] ?? 0));
+                        $num_points++;
+                    }
+                    if ($num_points > 0) {
+                        $data_start_row = $dataSourceHeaderRow + 1;
+                        $data_end_row = $dataSourceHeaderRow + $num_points;
+                        // Usar las variables para construir la referencia
+                        $pieLabels = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $labelColLetter . "$" . $data_start_row . ":$" . $labelColLetter . "$" . $data_end_row, null, $num_points)];
+                        $pieValues = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $data_start_row . ":$" . $valueColLetter . "$" . $data_end_row, null, $num_points)];
+                        
+                        $pos = $pieChartPositions[$pieChartIndex++];
+                        $endCol = Coordinate::stringFromColumnIndex(Coordinate::columnIndexFromString($pos['col']) + 7);
+                        $this->addSimplePieChart($mainSheet, 'pieChart' . $pieChartIndex, $pieLabels, $pieValues, $pos['col'] . $pos['row'], $endCol . ($pos['row'] + 15), $config['title']);
+                        
+                        $dataSheetRow = $data_end_row + 2;
+                    } else { $dataSheetRow++; }
+                }
+            }
+            $currentRow = $chartsStartRow + 51 + 17;
+
+            $barChartsCategoryData = $validatedData['barChartsPerCategoryData'] ?? [];
+            foreach ($barChartsCategoryData as $index => $chartData) {
+                $barChartTitle = $chartData['title'] ?? "Details";
+                $categoriesDataSource = $chartData['categories'] ?? [];
+                $valuesDataSource = $chartData['values'] ?? [];
+                if (count($categoriesDataSource) > 1 && count($valuesDataSource) > 1) {
+                    $dataSourceHeaderRow = $dataSheetRow;
+
+                    $categoryColLetter = Coordinate::stringFromColumnIndex(1); // 'A'
+                    $valueColLetter = Coordinate::stringFromColumnIndex(2); // 'B'
+
+                    $dataSheet->setCellValue($categoryColLetter . $dataSourceHeaderRow, $categoriesDataSource[0][0] ?? 'Category');
+                    $dataSheet->setCellValue($valueColLetter . $dataSourceHeaderRow, $valuesDataSource[0][0] ?? 'Value');
+                    
+                    $num_bar_points = count($categoriesDataSource) - 1;
+                    $data_start_row = $dataSourceHeaderRow + 1;
+                    $data_end_row = $dataSourceHeaderRow + $num_bar_points;
+                    for ($i = 0; $i < $num_bar_points; $i++) {
+                        $dataSheet->setCellValue($categoryColLetter . ($data_start_row + $i), $categoriesDataSource[$i + 1][0] ?? 'N/A');
+                        $dataSheet->setCellValue($valueColLetter . ($data_start_row + $i), (float)($valuesDataSource[$i + 1][0] ?? 0));
+                    }
+                    if ($num_bar_points > 0) {
+                        $barLegend = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $dataSourceHeaderRow, null, 1)];
+                        $barCategories = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $categoryColLetter . "$" . $data_start_row . ":$" . $categoryColLetter . "$" . $data_end_row, null, $num_bar_points)];
+                        $barValues = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $data_start_row . ":$" . $valueColLetter . "$" . $data_end_row, null, $num_bar_points)];
+                        
+                        $chartDisplayStartRowBar = $currentRow;
+                        $this->addSimpleBarChart($mainSheet, 'barChartCategory' . $index, $barLegend, $barCategories, $barValues, 'A' . $chartDisplayStartRowBar, 'H' . ($chartDisplayStartRowBar + 10 + $num_bar_points), $barChartTitle, "Amount");
+                        
+                        $currentRow = $chartDisplayStartRowBar + (10 + $num_bar_points) + 2;
+                        $dataSheetRow = $data_end_row + 2;
+                    }
+                }
+            }
+
+            $dataSheet->setSheetState(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_VERYHIDDEN);
+            $spreadsheet->setActiveSheetIndex(0);
+            
+            $highestColumn = $mainSheet->getHighestDataColumn();
+            if ($highestColumn && $highestColumn >= 'A') {
+                foreach (range('A', $highestColumn) as $col) {
+                    $mainSheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            $writer = new Xlsx($spreadsheet);
+            $writer->setIncludeCharts(true);
+            $filename = 'category_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
+            $storageDir = storage_path('app/reports');
+            if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
+            $filePath = $storageDir . '/' . $filename;
+            $writer->save($filePath);
+
+            return response()->json(['message' => 'Category report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+
+        } catch (\Exception $e) {
+            Log::error("Exception in CategoryReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating category report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        }
+    }
+
+    public function GenerateTagReport(TagReportRequest $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validated();
+            $spreadsheet = new Spreadsheet();
+
+            $mainSheet = $spreadsheet->getActiveSheet();
+            $mainSheetName = 'TagReport';
+            $mainSheet->setTitle($mainSheetName);
+            $currentRow = 1;
+
+            $dataSheet = $spreadsheet->createSheet();
+            $dataSheetName = 'ChartDataSource';
+            $dataSheet->setTitle($dataSheetName);
+            $dataSheetRow = 1;
+
+            $this->createTable($mainSheet, $currentRow, "Accounts", ["Name", "Spent", "Earned", "Sum"], $validatedData['accountsTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Tags", ["Name", "Spent", "Earned", "Sum"], $validatedData['tagsTableData'] ?? []);
+            $accountPerTagHeaders = $validatedData['accountPerTagTableHeaders'] ?? ['Name'];
+            $this->createTable($mainSheet, $currentRow, "Account per tag", $accountPerTagHeaders, $validatedData['accountPerTagTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average expense per destination account", ["Account", "Spent (average)", "Total", "Transaction count"], $validatedData['avgExpenseDestAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average earning per source account", ["Account", "Earned (average)", "Total", "Transaction count"], $validatedData['avgEarningSourceAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Expenses (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topExpensesTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Revenue / income (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topRevenueTableData'] ?? []);
+            
+            $chartsStartRow = $currentRow + 1;
+
+            $pieChartIndex = 0;
+            $pieChartPositions = [
+                ['row' => $chartsStartRow, 'col' => 'A'], ['row' => $chartsStartRow, 'col' => 'I'],
+                ['row' => $chartsStartRow + 17, 'col' => 'A'], ['row' => $chartsStartRow + 17, 'col' => 'I'],
+                ['row' => $chartsStartRow + 34, 'col' => 'A'], ['row' => $chartsStartRow + 34, 'col' => 'I'],
+                ['row' => $chartsStartRow + 51, 'col' => 'A'], ['row' => $chartsStartRow + 51, 'col' => 'I'],
+            ];
+            $pieChartConfigs = [
+                ['dataKey' => 'expensePerTagChartData', 'title' => 'Expense per tag'],
+                ['dataKey' => 'expensePerCategoryChartData', 'title' => 'Expense per category'],
+                ['dataKey' => 'incomePerCategoryChartData', 'title' => 'Income per category'],
+                ['dataKey' => 'expensePerBudgetChartData', 'title' => 'Expense per budget'],
+                ['dataKey' => 'expensesPerSourceAccountChartData', 'title' => 'Expenses per source account'],
+                ['dataKey' => 'incomePerSourceAccountChartData', 'title' => 'Income per source account'],
+                ['dataKey' => 'expensesPerDestinationAccountChartData', 'title' => 'Expenses per destination account'],
+                ['dataKey' => 'incomePerDestinationAccountChartData', 'title' => 'Income per destination account'],
+            ];
+
+            foreach ($pieChartConfigs as $config) {
+                $chartData = $validatedData[$config['dataKey']] ?? [];
+                if (!empty($chartData) && count($chartData) > 1) {
+                    $dataSheetRow = $this->writeAndCreatePieChart($mainSheet, $dataSheet, $dataSheetName, $dataSheetRow, $chartData, $pieChartPositions, $pieChartIndex, $config['title']);
+                }
+            }
+            $currentRow = $chartsStartRow + 68 + 2;
+
+            $barChartsTagData = $validatedData['barChartsPerTagData'] ?? [];
+            foreach ($barChartsTagData as $index => $chartData) {
+                $barChartTitle = $chartData['title'] ?? 'Income and expenses';
+                $categoriesDataSource = $chartData['categories'] ?? [];
+                $seriesData = $chartData['series'] ?? [];
+
+                if (count($categoriesDataSource) > 1 && !empty($seriesData)) {
+                    $dataSourceHeaderRow = $dataSheetRow;
+                    
+                    $categoryColLetter = Coordinate::stringFromColumnIndex(1); // 'A'
+                    $dataSheet->fromArray($categoriesDataSource, null, $categoryColLetter . $dataSourceHeaderRow);
+                    
+                    $num_points = count($categoriesDataSource) - 1;
+                    $data_start_row = $dataSourceHeaderRow + 1;
+                    $data_end_row = $dataSourceHeaderRow + $num_points;
+                    
+                    $barCategories = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $categoryColLetter . "$" . $data_start_row . ":$" . $categoryColLetter . "$" . $data_end_row, null, $num_points)];
+                    $multiSeriesValues = [];
+                    $multiSeriesLegend = [];
+
+                    foreach ($seriesData as $colIdx => $series) {
+                        $seriesName = $series[0] ?? 'Series ' . ($colIdx + 1);
+                        $seriesValues = $series[1] ?? [];
+                        $valueColLetter = Coordinate::stringFromColumnIndex(2 + $colIdx);
+
+                        $dataSheet->setCellValue($valueColLetter . $dataSourceHeaderRow, $seriesName);
+                        for ($i = 0; $i < $num_points; $i++) {
+                            $dataSheet->setCellValue($valueColLetter . ($data_start_row + $i), (float)($seriesValues[$i] ?? 0));
+                        }
+                        $multiSeriesLegend[] = new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $dataSourceHeaderRow, null, 1);
+                        $multiSeriesValues[] = new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $data_start_row . ":$" . $valueColLetter . "$" . $data_end_row, null, $num_points);
+                    }
+                    
+                    if (!empty($multiSeriesValues)) {
+                        $chartDisplayStartRowBar = $currentRow;
+                        $this->addMultiSeriesBarChart($mainSheet, 'barChartTag' . $index, $multiSeriesLegend, $barCategories, $multiSeriesValues, 'A' . $chartDisplayStartRowBar, 'J' . ($chartDisplayStartRowBar + 15), $barChartTitle);
+                        $currentRow = $chartDisplayStartRowBar + 15 + 2;
+                        $dataSheetRow = $data_end_row + 2;
+                    }
+                }
+            }
+            
+            $dataSheet->setSheetState(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_VERYHIDDEN);
+            $spreadsheet->setActiveSheetIndex(0);
+            
+            $highestColumn = $mainSheet->getHighestDataColumn();
+            if ($highestColumn && $highestColumn >= 'A') {
+                foreach (range('A', $highestColumn) as $col) {
+                    $mainSheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            $writer = new Xlsx($spreadsheet);
+            $writer->setIncludeCharts(true);
+            $filename = 'tag_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
+            $storageDir = storage_path('app/reports');
+            if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
+            $filePath = $storageDir . '/' . $filename;
+            $writer->save($filePath);
+
+            return response()->json(['message' => 'Tag report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+
+        } catch (\Exception $e) {
+            Log::error("Exception in GenerateTagReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating tag report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        }
+    }
+
+    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validated();
+            $spreadsheet = new Spreadsheet();
+
+            $mainSheet = $spreadsheet->getActiveSheet();
+            $mainSheetName = 'ExpenseRevenueReport'; // Nombre de la hoja actualizado
+            $mainSheet->setTitle($mainSheetName);
+            $currentRow = 1;
+
+            $dataSheet = $spreadsheet->createSheet();
+            $dataSheetName = 'ChartDataSource';
+            $dataSheet->setTitle($dataSheetName);
+            $dataSheetRow = 1;
+
+            // --- PASO 1: GENERAR TABLAS ---
+            $this->createTable($mainSheet, $currentRow, "Accounts", ["Name", "Spent", "Earned", "Sum"], $validatedData['accountsTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Tags", ["Name", "Spent", "Earned", "Sum"], $validatedData['tagsTableData'] ?? []);
+            $accountPerTagHeaders = $validatedData['accountPerTagTableHeaders'] ?? ['Name'];
+            $this->createTable($mainSheet, $currentRow, "Account per tag", $accountPerTagHeaders, $validatedData['accountPerTagTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average expense per destination account", ["Account", "Spent (average)", "Total", "Transaction count"], $validatedData['avgExpenseDestAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average earning per source account", ["Account", "Earned (average)", "Total", "Transaction count"], $validatedData['avgEarningSourceAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Expenses (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topExpensesTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Revenue / income (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topRevenueTableData'] ?? []);
+            
+            $chartsStartRow = $currentRow + 1;
+
+            // --- PASO 2: GENERAR GRÁFICOS DE PASTEL ---
+            $pieChartIndex = 0;
+            $pieChartPositions = [
+                ['row' => $chartsStartRow, 'col' => 'A'], ['row' => $chartsStartRow, 'col' => 'I'],
+                ['row' => $chartsStartRow + 17, 'col' => 'A'], ['row' => $chartsStartRow + 17, 'col' => 'I'],
+                ['row' => $chartsStartRow + 34, 'col' => 'A'], ['row' => $chartsStartRow + 34, 'col' => 'I'],
+                ['row' => $chartsStartRow + 51, 'col' => 'A'], ['row' => $chartsStartRow + 51, 'col' => 'I'],
+            ];
+            $pieChartConfigs = [
+                ['dataKey' => 'expensePerTagChartData', 'title' => 'Expense per tag'],
+                ['dataKey' => 'expensePerCategoryChartData', 'title' => 'Expense per category'],
+                ['dataKey' => 'incomePerCategoryChartData', 'title' => 'Income per category'],
+                ['dataKey' => 'expensePerBudgetChartData', 'title' => 'Expense per budget'],
+                ['dataKey' => 'expensesPerSourceAccountChartData', 'title' => 'Expenses per source account'],
+                ['dataKey' => 'incomePerSourceAccountChartData', 'title' => 'Income per source account'],
+                ['dataKey' => 'expensesPerDestinationAccountChartData', 'title' => 'Expenses per destination account'],
+                ['dataKey' => 'incomePerDestinationAccountChartData', 'title' => 'Income per destination account'],
+            ];
+
+            foreach ($pieChartConfigs as $config) {
+                $chartData = $validatedData[$config['dataKey']] ?? [];
+                if (!empty($chartData) && count($chartData) > 1) {
+                    $dataSheetRow = $this->writeAndCreatePieChart($mainSheet, $dataSheet, $dataSheetName, $dataSheetRow, $chartData, $pieChartPositions, $pieChartIndex, $config['title']);
+                }
+            }
+            $currentRow = $chartsStartRow + 68 + 2;
+
+            // --- PASO 3: GENERAR GRÁFICOS DE BARRAS ---
+            $barChartsTagData = $validatedData['barChartsPerTagData'] ?? [];
+            foreach ($barChartsTagData as $index => $chartData) {
+                // ... (la lógica interna de este bucle no cambia)
+                 $barChartTitle = $chartData['title'] ?? 'Income and expenses';
+                $categoriesDataSource = $chartData['categories'] ?? [];
+                $seriesData = $chartData['series'] ?? [];
+
+                if (count($categoriesDataSource) > 1 && !empty($seriesData)) {
+                    $dataSourceHeaderRow = $dataSheetRow;
+                    $categoryColLetter = Coordinate::stringFromColumnIndex(1);
+                    $dataSheet->fromArray($categoriesDataSource, null, $categoryColLetter . $dataSourceHeaderRow);
+                    
+                    $num_points = count($categoriesDataSource) - 1;
+                    $data_start_row = $dataSourceHeaderRow + 1;
+                    $data_end_row = $dataSourceHeaderRow + $num_points;
+                    
+                    $barCategories = [new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $categoryColLetter . "$" . $data_start_row . ":$" . $categoryColLetter . "$" . $data_end_row, null, $num_points)];
+                    $multiSeriesValues = [];
+                    $multiSeriesLegend = [];
+
+                    foreach ($seriesData as $colIdx => $series) {
+                        $seriesName = $series[0] ?? 'Series ' . ($colIdx + 1);
+                        $seriesValues = $series[1] ?? [];
+                        $valueColLetter = Coordinate::stringFromColumnIndex(2 + $colIdx);
+                        $dataSheet->setCellValue($valueColLetter . $dataSourceHeaderRow, $seriesName);
+                        for ($i = 0; $i < $num_points; $i++) {
+                            $dataSheet->setCellValue($valueColLetter . ($data_start_row + $i), (float)($seriesValues[$i] ?? 0));
+                        }
+                        $multiSeriesLegend[] = new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_STRING, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $dataSourceHeaderRow, null, 1);
+                        $multiSeriesValues[] = new DataSeriesValues(DataSeriesValues::DATASERIES_TYPE_NUMBER, "'" . $dataSheetName . "'!$" . $valueColLetter . "$" . $data_start_row . ":$" . $valueColLetter . "$" . $data_end_row, null, $num_points);
+                    }
+                    
+                    if (!empty($multiSeriesValues)) {
+                        $chartDisplayStartRowBar = $currentRow;
+                        $this->addMultiSeriesBarChart($mainSheet, 'barChartTag' . $index, $multiSeriesLegend, $barCategories, $multiSeriesValues, 'A' . $chartDisplayStartRowBar, 'J' . ($chartDisplayStartRowBar + 15), $barChartTitle);
+                        $currentRow = $chartDisplayStartRowBar + 15 + 2;
+                        $dataSheetRow = $data_end_row + 2;
+                    }
+                }
+            }
+            
+            // --- PASO 4: FINALIZAR Y GUARDAR ---
+            $dataSheet->setSheetState(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_VERYHIDDEN);
+            $spreadsheet->setActiveSheetIndex(0);
+            
+            $highestColumn = $mainSheet->getHighestDataColumn();
+            if ($highestColumn && $highestColumn >= 'A') {
+                foreach (range('A', $highestColumn) as $col) {
+                    $mainSheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            $writer = new Xlsx($spreadsheet);
+            $writer->setIncludeCharts(true);
+
+            // ***** CAMBIO EN EL NOMBRE DEL ARCHIVO *****
+            $filename = 'expense_revenue_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
+            
+            $storageDir = storage_path('app/reports');
+            if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
+            $filePath = $storageDir . '/' . $filename;
+            $writer->save($filePath);
+
+            return response()->json([
+                'message' => 'Expense/Revenue report generated successfully.',
+                'filename' => $filename,
+                'path' => $filePath
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error("Exception in GenerateExpenseRevenueReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating expense/revenue report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
         }
     }
 }

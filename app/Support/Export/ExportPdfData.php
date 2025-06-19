@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FireflyIII\Support\Export;
 
+// Core Dependencies
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -17,87 +18,103 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Pdf\Mpdf;
 
+// Request Types
 use FireflyIII\Api\V1\Requests\Data\Export\BudgetExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\DefaultReportExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\TransactionHistoryExportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\CategoryReportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\TagReportRequest;
+use FireflyIII\Api\V1\Requests\Data\Export\ExpenseRevenueReportRequest;
 
+// szymach/c-pchart classes with aliases
 use CpChart\Data as pData;
 use CpChart\Image as pImage;
 use CpChart\Chart\Pie as pPie;
 
+// --- Directory Constants Definitions ---
 if (!defined('CHART_TEMP_DIR_CPCHART')) {
-    $chartTempBasePath = function_exists('storage_path') ? storage_path('app/temp_charts_cpchart') : rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'temp_charts_cpchart';
+    $chartTempBasePath = function_exists('storage_path') ? storage_path('app' . DIRECTORY_SEPARATOR . 'temp_charts_cpchart') : rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'temp_charts_cpchart';
     define('CHART_TEMP_DIR_CPCHART', $chartTempBasePath);
 }
 
-if (!defined('CPCHART_FONT_PATH')) {
-    $fontBasePath = function_exists('storage_path') ? storage_path('fonts') : __DIR__ . '/../../storage/fonts';
-    define('CPCHART_FONT_PATH', $fontBasePath);
+// This constant is now for a user-provided CUSTOM font folder, as a fallback.
+if (!defined('CPCHART_FONT_PATH_FOLDER')) {
+    $projectRootGuess = realpath(__DIR__ . '/../../../../');
+    $fontBasePath = function_exists('storage_path') ? storage_path('fonts') : ($projectRootGuess ? $projectRootGuess . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'fonts' : '');
+    define('CPCHART_FONT_PATH_FOLDER', $fontBasePath);
 }
 
 class ExportPdfData {
-    private string $defaultFontFile;
+    private string $defaultFontFileAbsPath = '';
     private bool $pChartPrerequisitesMet = false;
 
     public function __construct() {
         if (!is_dir(CHART_TEMP_DIR_CPCHART)) {
             if (!@mkdir(CHART_TEMP_DIR_CPCHART, 0775, true) && !is_dir(CHART_TEMP_DIR_CPCHART)) {
-                Log::critical('CRITICAL c-pchart: Failed to create temporary directory: ' . CHART_TEMP_DIR_CPCHART . '. Verify permissions.');
-                return;
+                Log::critical('CRITICAL c-pchart: Failed to create temporary directory: ' . CHART_TEMP_DIR_CPCHART);
+                $this->pChartPrerequisitesMet = false; return;
             }
         }
         if (!is_writable(CHART_TEMP_DIR_CPCHART)) {
             Log::critical('CRITICAL c-pchart: Temporary directory ' . CHART_TEMP_DIR_CPCHART . ' IS NOT WRITABLE.');
-            return;
-        } else {
-            Log::info('c-pchart: Temp directory OK: ' . CHART_TEMP_DIR_CPCHART);
+            $this->pChartPrerequisitesMet = false; return;
         }
 
-        if (!is_dir(CPCHART_FONT_PATH)) {
-             Log::critical('CRITICAL c-pchart: Font directory CPCHART_FONT_PATH IS NOT A VALID DIRECTORY: ' . CPCHART_FONT_PATH . '. Please create this directory.');
-             return;
-        } else {
-            Log::info('c-pchart: Font directory OK: ' . CPCHART_FONT_PATH);
+        if (!class_exists('CpChart\Image')) {
+             Log::critical('CRITICAL c-pchart: Class CpChart\Image not found. Is szymach/c-pchart installed correctly and autoloaded?');
+             $this->pChartPrerequisitesMet = false; return;
         }
 
-        $this->defaultFontFile = rtrim(CPCHART_FONT_PATH, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . "DejaVuSans.ttf";
-        if (!file_exists($this->defaultFontFile)) {
-            $errorMessage = "CRITICAL c-pchart: Default font DejaVuSans.ttf NOT FOUND at configured path: {$this->defaultFontFile}. c-pchart charts will fail. Ensure CPCHART_FONT_PATH is correctly defined and DejaVuSans.ttf exists in that folder.";
-            Log::critical($errorMessage);
-            return;
-        } elseif (!is_readable($this->defaultFontFile)) {
-            Log::critical("CRITICAL c-pchart: Default font {$this->defaultFontFile} exists BUT IS NOT READABLE by the PHP process.");
-            return;
-        } else {
-            Log::info("c-pchart: Default font found and readable at: {$this->defaultFontFile}");
+        $this->defaultFontFileAbsPath = $this->getFontPath("DejaVuSans.ttf", true);
+        if (!file_exists($this->defaultFontFileAbsPath) || !is_readable($this->defaultFontFileAbsPath)) {
+            Log::warning("c-pchart: Default font DejaVuSans.ttf not found. Falling back to Verdana.ttf from package.");
+            $this->defaultFontFileAbsPath = $this->getFontPath("Verdana.ttf", true);
+             if (!file_exists($this->defaultFontFileAbsPath) || !is_readable($this->defaultFontFileAbsPath)) {
+                $errorMessage = "CRITICAL c-pchart: Default font (DejaVuSans.ttf or Verdana.ttf) could NOT be resolved to a valid, readable file. Charts will fail.";
+                Log::critical($errorMessage);
+                $this->pChartPrerequisitesMet = false; return;
+            }
         }
-
+        
         if (!function_exists('gd_info')) {
-            Log::critical('CRITICAL c-pchart: PHP GD extension is not installed or enabled. It is required to generate images.');
-            return;
+            Log::critical('CRITICAL c-pchart: PHP GD extension is not installed or enabled.');
+            $this->pChartPrerequisitesMet = false; return;
         } else {
             $gdInfo = gd_info();
             if (empty($gdInfo['PNG Support']) || empty($gdInfo['FreeType Support'])) {
-                 Log::critical('CRITICAL c-pchart: GD extension is enabled, but it appears to LACK SUPPORT FOR PNG and/or FreeType (required for TTF fonts). Review your GD configuration.');
-                 return;
+                 Log::critical('CRITICAL c-pchart: GD extension lacks PNG and/or FreeType support.');
+                 $this->pChartPrerequisitesMet = false; return;
             }
-            Log::info('c-pchart: GD extension detected with PNG and FreeType support.');
         }
         $this->pChartPrerequisitesMet = true;
+        Log::info("c-pchart: Prerequisites met. Default font for use is: {$this->defaultFontFileAbsPath}");
     }
 
-    private function getFontPath(string $fontName = "DejaVuSans.ttf"): string {
-        if (!$this->pChartPrerequisitesMet) return $fontName;
+    private function getFontPath(string $fontName = "DejaVuSans.ttf", bool $isInitialCheck = false): string {
+        $internalFontsDir = '';
+        if (class_exists('CpChart\Image')) {
+            try {
+                $reflector = new \ReflectionClass('CpChart\Image');
+                $internalFontsDir = realpath(dirname($reflector->getFileName()) . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'Resources' . DIRECTORY_SEPARATOR . 'fonts');
+                if (!$internalFontsDir || !is_dir($internalFontsDir)) $internalFontsDir = '';
+            } catch (\ReflectionException $e) { $internalFontsDir = ''; }
+        }
 
-        if ($fontName === "DejaVuSans.ttf" && $this->defaultFontFile && file_exists($this->defaultFontFile)) {
-            return $this->defaultFontFile;
+        if ($internalFontsDir) {
+            $internalPath = $internalFontsDir . DIRECTORY_SEPARATOR . $fontName;
+            if (file_exists($internalPath) && is_readable($internalPath)) return $internalPath;
         }
-        $customFontPath = rtrim(CPCHART_FONT_PATH, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $fontName;
-        if (file_exists($customFontPath) && is_readable($customFontPath)) {
-            return $customFontPath;
+
+        if (defined('CPCHART_FONT_PATH_FOLDER') && CPCHART_FONT_PATH_FOLDER && is_dir(CPCHART_FONT_PATH_FOLDER)) {
+            $customPath = rtrim(CPCHART_FONT_PATH_FOLDER, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $fontName;
+            if (file_exists($customPath) && is_readable($customPath)) return $customPath;
         }
-        Log::error("c-pchart: Requested font '{$fontName}' NOT FOUND or NOT READABLE at '{$customFontPath}'. Using fallback '{$this->defaultFontFile}' or just the name.");
-        return file_exists($this->defaultFontFile) ? $this->defaultFontFile : $fontName;
+        
+        if (!$isInitialCheck) {
+            Log::critical("c-pchart: CRITICAL - Could not resolve any valid, readable path for font '{$fontName}'.");
+        }
+
+        return $fontName;
     }
 
     private function addChartImageToSheet(Worksheet $sheet, string $imagePath, string $chartTitle, string $topLeftPosition, int $imageHeightInSheet = 250): void {
@@ -114,113 +131,79 @@ class ExportPdfData {
 
     private function generateChartImage(string $type, string $filenameBase, array $seriesData, array $xLabels, string $title, int $width, int $height): ?string {
         if (!$this->pChartPrerequisitesMet) {
-            Log::error("c-pchart ({$type}): Prerequisites not met, will not attempt to generate '{$title}'. Review CRITICAL logs from constructor.");
+            Log::error("c-pchart ({$type}): Prerequisites not met, will not attempt to generate '{$title}'.");
             return null;
         }
-        if (empty($xLabels) || empty($seriesData)) { Log::warning("c-pchart ({$type}): Insufficient data for '{$title}'."); return null; }
-
-        $validSeriesData = []; $maxPoints = 0;
-        foreach ($seriesData as $serie) {
-            if (isset($serie[0], $serie[1]) && is_array($serie[1]) && !empty($serie[1])) {
-                $validSeriesData[] = $serie;
-                if (count($serie[1]) > $maxPoints) $maxPoints = count($serie[1]);
-            }
+        if ((empty($xLabels) && $type !== 'pie') || empty($seriesData)) {
+            Log::warning("c-pchart ({$type}): Insufficient data for '{$title}'.");
+            return null;
         }
-        if (empty($validSeriesData)) { Log::warning("c-pchart ({$type}): No valid series with data points for '{$title}'."); return null; }
-        if ($maxPoints > 0 && count($xLabels) < $maxPoints) $xLabels = array_pad($xLabels, $maxPoints, "N/A");
 
         try {
             $myData = new pData();
-            foreach ($validSeriesData as $serie) $myData->addPoints(array_pad($serie[1], $maxPoints, VOID), (string)$serie[0]);
-            $myData->setAxisName(0, "Values");
-            if ($maxPoints > 0) {
-                 $myData->addPoints(array_slice($xLabels,0,$maxPoints), "Labels");
-                 $myData->setSerieDescription("Labels", "Categories");
-                 $myData->setAbscissa("Labels");
+            $fontFile = $this->defaultFontFileAbsPath;
+            
+            if ($type === 'pie') {
+                $points = []; $pieLabels = [];
+                foreach($seriesData as $row) if (isset($row[0], $row[1]) && $row[1] > 0) { $points[] = (float)$row[1]; $pieLabels[] = (string)$row[0]; }
+                if (empty($points)) { Log::warning("c-pchart (Pie): No valid data points > 0 for '{$title}'."); return null; }
+                $myData->addPoints($points, "Data"); $myData->addPoints($pieLabels, "Labels"); $myData->setAbscissa("Labels");
             } else {
-                $myData->addPoints(["No Data"], "Labels");
-                $myData->setAbscissa("Labels");
+                $validSeriesData = []; $maxPoints = 0;
+                foreach ($seriesData as $serie) {
+                    if (isset($serie[0], $serie[1]) && is_array($serie[1]) && !empty($serie[1])) {
+                        $validSeriesData[] = $serie;
+                        if (count($serie[1]) > $maxPoints) $maxPoints = count($serie[1]);
+                    }
+                }
+                if (empty($validSeriesData)) { Log::warning("c-pchart ({$type}): No valid series with data points for '{$title}'."); return null; }
+                if ($maxPoints > 0 && count($xLabels) < $maxPoints) $xLabels = array_pad($xLabels, $maxPoints, "N/A");
+                foreach ($validSeriesData as $serie) $myData->addPoints(array_pad($serie[1], $maxPoints, VOID), (string)$serie[0]);
+                $myData->setAxisName(0, "Values");
+                if ($maxPoints > 0) {
+                    $myData->addPoints(array_slice($xLabels,0,$maxPoints), "Labels");
+                    $myData->setSerieDescription("Labels", "Categories");
+                    $myData->setAbscissa("Labels");
+                }
             }
 
             $myPicture = new pImage($width, $height, $myData, TRUE);
             $myPicture->Antialias = TRUE;
-            $fontFile = $this->getFontPath("DejaVuSans.ttf");
-            if (!file_exists($fontFile) || !is_readable($fontFile)) {
-                Log::critical("c-pchart ({$type}): CRITICAL FAILURE - Font '{$fontFile}' is not a valid/readable file for '{$title}'. Cannot continue with this chart.");
-                return null;
-            }
 
             $myPicture->drawFilledRectangle(0, 0, $width - 1, $height - 1, ["R" => 240, "G" => 240, "B" => 240]);
             $myPicture->drawRectangle(0,0,$width-1,$height-1,["R"=>200,"G"=>200,"B"=>200]);
             $myPicture->setFontProperties(["FontName" => $fontFile, "FontSize" => 11]);
             $myPicture->drawText($width / 2, 25, $title, ["Align" => TEXT_ALIGN_MIDDLEMIDDLE]);
             $myPicture->setFontProperties(["FontName" => $fontFile, "FontSize" => 7]);
-            $myPicture->setGraphArea(60, 50, $width - 50, $height - 50);
-            $myPicture->drawScale(["CycleBackground" => TRUE, "DrawSubTicks" => TRUE, "GridR" => 0, "GridG" => 0, "GridB" => 0, "GridAlpha" => 10, "LabelingMethod"=>LABELING_ALL, "Mode" => ($type === 'bar' ? SCALE_MODE_START0 : SCALE_MODE_FLOATING)]);
-
-            if ($type === 'line') {
-                $myPicture->drawLineChart();
-                $myPicture->drawPlotChart(["PlotBorder" => TRUE, "BorderSize" => 1,"Surrounding"=>-60,"BorderAlpha"=>80]);
-            } elseif ($type === 'bar') {
-                $myPicture->drawBarChart(["DisplayValues"=>FALSE, "DisplayR"=>0, "DisplayG"=>0, "DisplayB"=>0, "DisplayShadow"=>TRUE, "Surrounding"=>30]);
+            
+            if ($type !== 'pie') {
+                $myPicture->setGraphArea(60, 50, $width - 50, $height - 50);
+                $myPicture->drawScale(["CycleBackground" => TRUE, "DrawSubTicks" => TRUE, "GridR" => 0, "GridG" => 0, "GridB" => 0, "GridAlpha" => 10, "LabelingMethod"=>LABELING_ALL, "Mode" => ($type === 'bar' ? SCALE_MODE_START0 : SCALE_MODE_FLOATING)]);
+                if ($type === 'line') $myPicture->drawLineChart();
+                elseif ($type === 'bar') $myPicture->drawBarChart(["DisplayValues"=>FALSE]);
+                $myPicture->setFontProperties(["FontName" => $fontFile, "FontSize" => 8]);
+                $myPicture->drawLegend($width / 2, $height - 25, ["Style" => LEGEND_NOBORDER, "Mode" => LEGEND_HORIZONTAL, "Align" => TEXT_ALIGN_BOTTOMMIDDLE]);
+            } else {
+                $pieChart = new pPie($myPicture, $myData);
+                $pieChart->draw3DPie($width/2 - 50,$height/2 + 10, ["Radius"=> ($width < $height ? $width : $height) / 3.5, "WriteValues"=>PIE_VALUE_PERCENTAGE, "DataGapAngle"=>8, "Border"=>TRUE]);
+                $pieChart->drawPieLegend($width - 140, 50, ["Style"=>LEGEND_NOBORDER,"Mode"=>LEGEND_VERTICAL, "FontSize"=>7, "WritePValues"=>TRUE]);
             }
-
-            $myPicture->setFontProperties(["FontName" => $fontFile, "FontSize" => 8]);
-            $myPicture->drawLegend($width / 2, $height - 25, ["Style" => LEGEND_NOBORDER, "Mode" => LEGEND_HORIZONTAL, "Align" => TEXT_ALIGN_BOTTOMMIDDLE, "BoxWidth"=>5, "BoxHeight"=>5, "Margin"=>5]);
 
             $imagePath = CHART_TEMP_DIR_CPCHART . DIRECTORY_SEPARATOR . $filenameBase . ".png";
             if (file_exists($imagePath)) @unlink($imagePath);
             $myPicture->render($imagePath);
             if (!file_exists($imagePath)) {
-                 Log::error("c-pchart ({$type}): pChart->render() did not create the image file for '{$title}' at '{$imagePath}'. Check PHP logs for pChart/GD errors.");
+                 Log::error("c-pchart ({$type}): pChart->render() did not create the image file for '{$title}'.");
                 return null;
             }
             return $imagePath;
         } catch (\Throwable $e) {
-            Log::error("c-pchart ({$type}): Exception for '{$title}': " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Log::error("c-pchart ({$type}): Exception rendering chart '{$title}': " . $e->getMessage() . "\n" . $e->getTraceAsString());
             return null;
         }
     }
-
-    private function generatePieChartImageCPChart(string $filenameBase, array $data, string $title, int $width = 450, int $height = 280): ?string {
-         if (!$this->pChartPrerequisitesMet) {
-            Log::error("c-pchart (Pie): Prerequisites not met, will not attempt to generate '{$title}'.");
-            return null;
-        }
-        if (empty($data)) { Log::warning("c-pchart (Pie): Empty data for '{$title}'."); return null; }
-        $points = []; $labels = [];
-        foreach($data as $row) if (isset($row[0], $row[1]) && $row[1] > 0) { $points[] = (float)$row[1]; $labels[] = (string)$row[0]; }
-        if (empty($points)) { Log::warning("c-pchart (Pie): No valid data points for '{$title}'."); return null; }
-
-        try {
-            $myData = new pData();
-            $myData->addPoints($points, "Data"); $myData->addPoints($labels, "Labels"); $myData->setAbscissa("Labels");
-            $myPicture = new pImage($width, $height, $myData, TRUE); $myPicture->Antialias = TRUE;
-            $fontFile = $this->getFontPath();
-            if (!file_exists($fontFile) || !is_readable($fontFile)) { Log::critical("c-pchart (Pie): CRITICAL FAILURE - Font '{$fontFile}' is not a valid/readable file for '{$title}'."); return null; }
-
-            $myPicture->drawFilledRectangle(0,0,$width-1,$height-1,["R"=>240,"G"=>240,"B"=>240]);
-            $myPicture->drawRectangle(0,0,$width-1,$height-1,["R"=>200,"G"=>200,"B"=>200]);
-            $myPicture->setFontProperties(["FontName"=>$fontFile,"FontSize"=>11]);
-            $myPicture->drawText($width/2,20,$title,["Align"=>TEXT_ALIGN_TOPMIDDLE]);
-            $myPicture->setFontProperties(["FontName"=>$fontFile,"FontSize"=>8]);
-            $pieChart = new pPie($myPicture, $myData);
-            $pieChart->draw3DPie($width/2 - 50,$height/2 + 10, ["Radius"=> ($width < $height ? $width : $height) / 3.5, "WriteValues"=>PIE_VALUE_PERCENTAGE, "DataGapAngle"=>8, "DataGapRadius"=>6, "Border"=>TRUE, "ValueR"=>0, "ValueG"=>0, "ValueB"=>0, "ValueAlpha"=>90, "Precision" => 0]);
-            $pieChart->drawPieLegend($width - 140, 50, ["Style"=>LEGEND_NOBORDER,"Mode"=>LEGEND_VERTICAL, "FontR"=>0,"FontG"=>0,"FontB"=>0,"FontSize"=>7, "WritePValues"=>TRUE]);
-
-            $imagePath = CHART_TEMP_DIR_CPCHART . DIRECTORY_SEPARATOR . $filenameBase . ".png";
-            if (file_exists($imagePath)) @unlink($imagePath);
-            $myPicture->render($imagePath);
-             if (!file_exists($imagePath)) {
-                 Log::error("c-pchart (Pie): pChart->render() did not create the image file for '{$title}' at '{$imagePath}'.");
-                return null;
-            }
-            return $imagePath;
-        } catch (\Throwable $e) { Log::error("c-pchart (Pie): Exception for '{$title}': " . $e->getMessage() . "\n" . $e->getTraceAsString()); return null; }
-    }
-
-    private function createTable(Worksheet $sheet, int &$masterCurrentRow, string $title, array $headers, array $data, bool $hasTotalRow = false): void
-    {
+    
+    private function createTable(Worksheet $sheet, int &$masterCurrentRow, string $title, array $headers, array $data, bool $hasTotalRow = false): void {
         $tableTitleRow = $masterCurrentRow;
         $firstColLetter = Coordinate::stringFromColumnIndex(1);
         $sheet->setCellValue($firstColLetter . $tableTitleRow, $title);
@@ -277,17 +260,14 @@ class ExportPdfData {
             if ($indexOfSumColumn > 0) {
                 $totalLabelColLetter = Coordinate::stringFromColumnIndex(max(1, $indexOfSumColumn - 1));
                 $totalValueColLetter = Coordinate::stringFromColumnIndex($indexOfSumColumn);
-                $totalLabelCellCoordinate = $totalLabelColLetter . $totalRowActual;
-                $totalValueCellCoordinate = $totalValueColLetter . $totalRowActual;
                 if ($indexOfSumColumn > 1) {
-                     $sheet->setCellValue($totalLabelCellCoordinate, "Total");
-                     $sheet->getStyle($totalLabelCellCoordinate)->getFont()->setBold(true);
-                     $sheet->setCellValueExplicit($totalValueCellCoordinate, $sumTotal, DataType::TYPE_NUMERIC);
-                     $sheet->getStyle($totalValueCellCoordinate)->getFont()->setBold(true);
+                     $sheet->setCellValue($totalLabelColLetter . $totalRowActual, "Total");
+                     $sheet->getStyle($totalLabelColLetter . $totalRowActual)->getFont()->setBold(true);
+                     $sheet->setCellValueExplicit($totalValueColLetter . $totalRowActual, $sumTotal, DataType::TYPE_NUMERIC);
                 } else {
-                    $sheet->setCellValue($totalValueCellCoordinate, "Total: " . $sumTotal);
-                    $sheet->getStyle($totalValueCellCoordinate)->getFont()->setBold(true);
+                    $sheet->setCellValue($totalValueColLetter . $totalRowActual, "Total: " . $sumTotal);
                 }
+                $sheet->getStyle($totalValueColLetter . $totalRowActual)->getFont()->setBold(true);
             }
             $masterCurrentRow++;
         }
@@ -465,7 +445,7 @@ class ExportPdfData {
                 if(count($expensePerBudgetChartData) > 1) for($i=1; $i<count($expensePerBudgetChartData); $i++) if(isset($expensePerBudgetChartData[$i][0],$expensePerBudgetChartData[$i][1])) $pieData1[] = [(string)$expensePerBudgetChartData[$i][0], (float)$expensePerBudgetChartData[$i][1]];
                 $chartTitlePie1 = "Expense per budget";
                 if(!empty($pieData1)){
-                    $imgPathPie1 = $this->generatePieChartImageCPChart('budget_pie1_'.time().rand(100,999), $pieData1, $chartTitlePie1, 450, $pieImageHeight);
+                    $imgPathPie1 = $this->generateChartImage('pie','budget_pie1_'.time().rand(100,999), $pieData1, [], $chartTitlePie1, 450, $pieImageHeight);
                     if($imgPathPie1) { $this->addChartImageToSheet($sheet, $imgPathPie1, $chartTitlePie1, 'A'.$currentRow, $pieImageHeight); $currentRow += $this->calculateChartHeightInRows($pieImageHeight); }
                     else { $sheet->setCellValue('A'.$currentRow, "Error generating chart: {$chartTitlePie1}"); $currentRow+=2; }
                 } else { $sheet->setCellValue('A'.$currentRow, "No data for chart: {$chartTitlePie1}"); $currentRow+=2; }
@@ -476,7 +456,7 @@ class ExportPdfData {
                 if(count($expensePerCategoryChartData)>1) for($i=1; $i<count($expensePerCategoryChartData); $i++) if(isset($expensePerCategoryChartData[$i][0],$expensePerCategoryChartData[$i][1])) $pieData2[] = [(string)$expensePerCategoryChartData[$i][0], (float)$expensePerCategoryChartData[$i][1]];
                 $chartTitlePie2 = "Expense per category";
                 if(!empty($pieData2)){
-                    $imgPathPie2 = $this->generatePieChartImageCPChart('budget_pie2_'.time().rand(100,999), $pieData2, $chartTitlePie2, 450, $pieImageHeight);
+                    $imgPathPie2 = $this->generateChartImage('pie','budget_pie2_'.time().rand(100,999), $pieData2, [], $chartTitlePie2, 450, $pieImageHeight);
                     if($imgPathPie2) { $this->addChartImageToSheet($sheet, $imgPathPie2, $chartTitlePie2, 'A'.$currentRow, $pieImageHeight); $currentRow += $this->calculateChartHeightInRows($pieImageHeight); }
                     else { $sheet->setCellValue('A'.$currentRow, "Error generating chart: {$chartTitlePie2}"); $currentRow+=2; }
                 } else { $sheet->setCellValue('A'.$currentRow, "No data for chart: {$chartTitlePie2}"); $currentRow+=2; }
@@ -518,6 +498,383 @@ class ExportPdfData {
         } catch (\Throwable $e) {
             Log::error("PDF BudgetReport (c-pchart): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString()."\nFile: ".$e->getFile()." Line: ".$e->getLine());
             return response()->json(['error' => 'PDF Error.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        }
+    }
+    
+    public function GenerateCategoryReport(CategoryReportRequest $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validated();
+            $spreadsheet = new Spreadsheet();
+            $mainSheet = $spreadsheet->getActiveSheet();
+            $mainSheet->setTitle('CategoryReport');
+            $currentRow = 1;
+
+            $this->createTable($mainSheet, $currentRow, "Accounts", ["Name", "Spent", "Earned", "Sum"], $validatedData['accountsTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Categories", ["Name", "Spent", "Earned", "Sum"], $validatedData['categoriesTableData'] ?? []);
+            $accountPerCategoryHeaders = $validatedData['accountPerCategoryTableHeaders'] ?? ['Name'];
+            $this->createTable($mainSheet, $currentRow, "Account per category", $accountPerCategoryHeaders, $validatedData['accountPerCategoryTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average expense per destination account", ["Account", "Spent (average)", "Total", "Transaction count"], $validatedData['avgExpenseDestAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average earning per source account", ["Account", "Earned (average)", "Total", "Transaction count"], $validatedData['avgEarningSourceAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Expenses (top 10)", ["Description", "Date", "Account", "Category", "Amount"], $validatedData['topExpensesTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Revenue / income (top 10)", ["Description", "Date", "Account", "Category", "Amount"], $validatedData['topRevenueTableData'] ?? []);
+            
+            if (!$this->pChartPrerequisitesMet) {
+                Log::error("GenerateCategoryReport: Prerequisites for pChart not met. Charts will be skipped.");
+                $mainSheet->setCellValue('A' . ($currentRow + 1), "Chart configuration incomplete. Check server logs.");
+            } else {
+                $chartsStartRow = $currentRow + 1;
+                $pieImageHeight = 280;
+                $pieChartColumns = ['A', 'I'];
+                $currentChartRow = $chartsStartRow;
+                $currentChartColIndex = 0;
+                
+                $pieChartConfigs = [
+                    ['dataKey' => 'expensePerCategoryChartData', 'title' => 'Expense per Category'],
+                    ['dataKey' => 'incomePerCategoryChartData', 'title' => 'Income per Category'],
+                    ['dataKey' => 'expensePerBudgetChartData', 'title' => 'Expense per Budget'],
+                    ['dataKey' => 'expensesPerSourceAccountChartData', 'title' => 'Expenses per Source Account'],
+                    ['dataKey' => 'incomePerSourceAccountChartData', 'title' => 'Income per Source Account'],
+                    ['dataKey' => 'expensesPerDestinationAccountChartData', 'title' => 'Expenses per Destination Account'],
+                    ['dataKey' => 'incomePerDestinationAccountChartData', 'title' => 'Income per Destination Account'],
+                ];
+
+                foreach ($pieChartConfigs as $config) {
+                    $chartData = $validatedData[$config['dataKey']] ?? [];
+                    $pieData = [];
+                    if (count($chartData) > 1) {
+                        for ($i = 1; $i < count($chartData); $i++) if (isset($chartData[$i][0], $chartData[$i][1])) $pieData[] = [(string)$chartData[$i][0], (float)$chartData[$i][1]];
+                    }
+                    
+                    $col = $pieChartColumns[$currentChartColIndex];
+                    $topLeftPosition = $col . $currentChartRow;
+
+                    if (!empty($pieData)) {
+                        $imagePath = $this->generateChartImage('pie', 'cat_pie_' . $currentChartColIndex . '_' . time() . rand(100,999), $pieData, [], $config['title'], 450, $pieImageHeight);
+                        if ($imagePath) {
+                            $this->addChartImageToSheet($mainSheet, $imagePath, $config['title'], $topLeftPosition, $pieImageHeight);
+                        } else {
+                            $mainSheet->setCellValue($topLeftPosition, "Error generating chart: " . $config['title']);
+                        }
+                    } else {
+                        $mainSheet->setCellValue($topLeftPosition, "No data for chart: " . $config['title']);
+                    }
+
+                    $currentChartColIndex++;
+                    if ($currentChartColIndex >= count($pieChartColumns)) {
+                        $currentChartColIndex = 0;
+                        $currentChartRow += $this->calculateChartHeightInRows($pieImageHeight);
+                    }
+                }
+                
+                if ($currentChartColIndex != 0) $currentChartRow += $this->calculateChartHeightInRows($pieImageHeight);
+                $currentRow = $currentChartRow + 2;
+
+                $barChartsCategoryData = $validatedData['barChartsPerCategoryData'] ?? [];
+                $barImageHeight = 300;
+                foreach ($barChartsCategoryData as $index => $chartData) {
+                    $barTitle = $chartData['title'] ?? "Details";
+                    $categoriesDataSource = $chartData['categories'] ?? [];
+                    $valuesDataSource = $chartData['values'] ?? [];
+                    $barXLabels = [];
+                    if(count($categoriesDataSource)>1) for($i=1; $i<count($categoriesDataSource); $i++) $barXLabels[] = (string)($categoriesDataSource[$i][0] ?? 'N/A');
+                    
+                    $barSeriesData = [];
+                    if(count($valuesDataSource)>1 && isset($valuesDataSource[0][0])){
+                        $seriesName = (string)($valuesDataSource[0][0] ?? 'Amount');
+                        $seriesValues = [];
+                        for($i=1; $i<count($valuesDataSource); $i++) $seriesValues[] = (float)($valuesDataSource[$i][0] ?? 0);
+                        if(!empty($seriesValues)) $barSeriesData[] = [$seriesName, $seriesValues];
+                    }
+
+                    if(!empty($barXLabels) && !empty($barSeriesData)){
+                        $imgPathBar = $this->generateChartImage('bar','cat_bar'.$index.'_'.time().rand(100,999), $barSeriesData, $barXLabels, $barTitle, 700, $barImageHeight);
+                        if($imgPathBar) { 
+                            $this->addChartImageToSheet($mainSheet, $imgPathBar, $barTitle, 'A'.$currentRow, $barImageHeight); 
+                            $currentRow += $this->calculateChartHeightInRows($barImageHeight); 
+                        } else { 
+                            $mainSheet->setCellValue('A'.$currentRow, "Error generating chart: {$barTitle}"); $currentRow+=2; 
+                        }
+                    } else { 
+                        $mainSheet->setCellValue('A'.$currentRow, "No data for chart: {$barTitle}"); $currentRow+=2; 
+                    }
+                    $currentRow++;
+                }
+            }
+
+            $highestColumn = $mainSheet->getHighestDataColumn();
+            if ($highestColumn && $highestColumn >= 'A') {
+                foreach (range('A', $highestColumn) as $col) {
+                    $mainSheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            $writer = new Mpdf($spreadsheet);
+            $filename = 'category_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            $storageDir = function_exists('storage_path') ? storage_path('app/reports') : __DIR__.'/../../storage/app/reports';
+            if (!is_dir($storageDir)) { @mkdir($storageDir, 0755, true); }
+            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
+            $writer->save($filePath);
+
+            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/cat_*.png');
+
+            return response()->json(['message' => 'Category report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+
+        } catch (\Throwable $e) {
+            Log::error("Exception in CategoryReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating category report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        }
+    }
+
+    public function GenerateTagReport(TagReportRequest $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validated();
+            $spreadsheet = new Spreadsheet();
+            $mainSheet = $spreadsheet->getActiveSheet();
+            $mainSheet->setTitle('TagReport');
+            $currentRow = 1;
+
+            // 1. Generate all tables first
+            $this->createTable($mainSheet, $currentRow, "Accounts", ["Name", "Spent", "Earned", "Sum"], $validatedData['accountsTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Tags", ["Name", "Spent", "Earned", "Sum"], $validatedData['tagsTableData'] ?? []);
+            $accountPerTagHeaders = $validatedData['accountPerTagTableHeaders'] ?? ['Name'];
+            $this->createTable($mainSheet, $currentRow, "Account per tag", $accountPerTagHeaders, $validatedData['accountPerTagTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average expense per destination account", ["Account", "Spent (average)", "Total", "Transaction count"], $validatedData['avgExpenseDestAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average earning per source account", ["Account", "Earned (average)", "Total", "Transaction count"], $validatedData['avgEarningSourceAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Expenses (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topExpensesTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Revenue / income (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topRevenueTableData'] ?? []);
+            
+            // 2. Check if chart generation prerequisites are met
+            if (!$this->pChartPrerequisitesMet) {
+                Log::error("GenerateTagReport: Prerequisites for pChart not met. Charts will be skipped.");
+                $mainSheet->setCellValue('A' . ($currentRow + 1), "Chart configuration incomplete. Check server logs.");
+            } else {
+                $chartsStartRow = $currentRow + 1;
+                $pieImageHeight = 280;
+                $pieChartColumns = ['A', 'I'];
+                $currentChartRow = $chartsStartRow;
+                $currentChartColIndex = 0;
+                
+                // 3. Generate Pie Charts
+                $pieChartConfigs = [
+                    ['dataKey' => 'expensePerTagChartData', 'title' => 'Expense per Tag'],
+                    ['dataKey' => 'expensePerCategoryChartData', 'title' => 'Expense per Category'],
+                    ['dataKey' => 'incomePerCategoryChartData', 'title' => 'Income per Category'],
+                    ['dataKey' => 'expensePerBudgetChartData', 'title' => 'Expense per Budget'],
+                    ['dataKey' => 'expensesPerSourceAccountChartData', 'title' => 'Expenses per Source Account'],
+                    ['dataKey' => 'incomePerSourceAccountChartData', 'title' => 'Income per Source Account'],
+                    ['dataKey' => 'expensesPerDestinationAccountChartData', 'title' => 'Expenses per Destination Account'],
+                    ['dataKey' => 'incomePerDestinationAccountChartData', 'title' => 'Income per Destination Account'],
+                ];
+
+                foreach ($pieChartConfigs as $config) {
+                    $chartData = $validatedData[$config['dataKey']] ?? [];
+                    $pieData = [];
+                    if (count($chartData) > 1) {
+                        for ($i = 1; $i < count($chartData); $i++) if (isset($chartData[$i][0], $chartData[$i][1])) $pieData[] = [(string)$chartData[$i][0], (float)$chartData[$i][1]];
+                    }
+                    
+                    $col = $pieChartColumns[$currentChartColIndex];
+                    $topLeftPosition = $col . $currentChartRow;
+
+                    if (!empty($pieData)) {
+                        $imagePath = $this->generateChartImage('pie', 'tag_pie_' . $currentChartColIndex . '_' . time() . rand(100,999), $pieData, [], $config['title'], 450, $pieImageHeight);
+                        if ($imagePath) {
+                            $this->addChartImageToSheet($mainSheet, $imagePath, $config['title'], $topLeftPosition, $pieImageHeight);
+                        } else {
+                            $mainSheet->setCellValue($topLeftPosition, "Error generating chart: " . $config['title']);
+                        }
+                    } else {
+                        $mainSheet->setCellValue($topLeftPosition, "No data for chart: " . $config['title']);
+                    }
+
+                    $currentChartColIndex++;
+                    if ($currentChartColIndex >= count($pieChartColumns)) {
+                        $currentChartColIndex = 0;
+                        $currentChartRow += $this->calculateChartHeightInRows($pieImageHeight);
+                    }
+                }
+                
+                if ($currentChartColIndex != 0) $currentChartRow += $this->calculateChartHeightInRows($pieImageHeight);
+                $currentRow = $currentChartRow + 2;
+
+                // 4. Generate Multi-Series Bar Charts
+                $barChartsTagData = $validatedData['barChartsPerTagData'] ?? [];
+                $barImageHeight = 350; // Taller for multi-series legend
+                foreach ($barChartsTagData as $index => $chartData) {
+                    $barTitle = $chartData['title'] ?? 'Income and expenses';
+                    $categoriesDataSource = $chartData['categories'] ?? [];
+                    $barSeriesData = $chartData['series'] ?? []; // The format should already match
+
+                    $barXLabels = [];
+                    if(count($categoriesDataSource)>1) for($i=1; $i<count($categoriesDataSource); $i++) $barXLabels[] = (string)($categoriesDataSource[$i][0] ?? 'N/A');
+                    
+                    if(!empty($barXLabels) && !empty($barSeriesData)){
+                        $imgPathBar = $this->generateChartImage('bar','tag_bar'.$index.'_'.time().rand(100,999), $barSeriesData, $barXLabels, $barTitle, 700, $barImageHeight);
+                        if($imgPathBar) { 
+                            $this->addChartImageToSheet($mainSheet, $imgPathBar, $barTitle, 'A'.$currentRow, $barImageHeight); 
+                            $currentRow += $this->calculateChartHeightInRows($barImageHeight); 
+                        } else { 
+                            $mainSheet->setCellValue('A'.$currentRow, "Error generating chart: {$barTitle}"); $currentRow+=2; 
+                        }
+                    } else { 
+                        $mainSheet->setCellValue('A'.$currentRow, "No data for chart: {$barTitle}"); $currentRow+=2; 
+                    }
+                    $currentRow++;
+                }
+            }
+
+            // 5. Finalize and save the PDF
+            $highestColumn = $mainSheet->getHighestDataColumn();
+            if ($highestColumn && $highestColumn >= 'A') {
+                foreach (range('A', $highestColumn) as $col) {
+                    $mainSheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            $writer = new Mpdf($spreadsheet);
+            $filename = 'tag_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            $storageDir = function_exists('storage_path') ? storage_path('app/reports') : __DIR__.'/../../storage/app/reports';
+            if (!is_dir($storageDir)) { @mkdir($storageDir, 0755, true); }
+            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
+            $writer->save($filePath);
+
+            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/tag_*.png');
+
+            return response()->json(['message' => 'Tag report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+
+        } catch (\Throwable $e) {
+            Log::error("Exception in GenerateTagReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating tag report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        }
+    }
+
+    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): JsonResponse
+    {
+        try {
+            $validatedData = $request->validated();
+            $spreadsheet = new Spreadsheet();
+            $mainSheet = $spreadsheet->getActiveSheet();
+            $mainSheet->setTitle('ExpenseRevenueReport');
+            $currentRow = 1;
+
+            // 1. Generate all tables first
+            $this->createTable($mainSheet, $currentRow, "Accounts", ["Name", "Spent", "Earned", "Sum"], $validatedData['accountsTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Tags", ["Name", "Spent", "Earned", "Sum"], $validatedData['tagsTableData'] ?? []);
+            $accountPerTagHeaders = $validatedData['accountPerTagTableHeaders'] ?? ['Name'];
+            $this->createTable($mainSheet, $currentRow, "Account per tag", $accountPerTagHeaders, $validatedData['accountPerTagTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average expense per destination account", ["Account", "Spent (average)", "Total", "Transaction count"], $validatedData['avgExpenseDestAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Average earning per source account", ["Account", "Earned (average)", "Total", "Transaction count"], $validatedData['avgEarningSourceAccountTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Expenses (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topExpensesTableData'] ?? []);
+            $this->createTable($mainSheet, $currentRow, "Revenue / income (top 10)", ["Description", "Date", "Account", "Tag", "Amount"], $validatedData['topRevenueTableData'] ?? []);
+            
+            // 2. Check if chart generation prerequisites are met
+            if (!$this->pChartPrerequisitesMet) {
+                Log::error("GenerateExpenseRevenueReport: Prerequisites for pChart not met. Charts will be skipped.");
+                $mainSheet->setCellValue('A' . ($currentRow + 1), "Chart configuration incomplete. Check server logs.");
+            } else {
+                $chartsStartRow = $currentRow + 1;
+                $pieImageHeight = 280;
+                $pieChartColumns = ['A', 'I'];
+                $currentChartRow = $chartsStartRow;
+                $currentChartColIndex = 0;
+                
+                // 3. Generate Pie Charts
+                $pieChartConfigs = [
+                    ['dataKey' => 'expensePerTagChartData', 'title' => 'Expense per Tag'],
+                    ['dataKey' => 'expensePerCategoryChartData', 'title' => 'Expense per Category'],
+                    ['dataKey' => 'incomePerCategoryChartData', 'title' => 'Income per Category'],
+                    ['dataKey' => 'expensePerBudgetChartData', 'title' => 'Expense per Budget'],
+                    ['dataKey' => 'expensesPerSourceAccountChartData', 'title' => 'Expenses per Source Account'],
+                    ['dataKey' => 'incomePerSourceAccountChartData', 'title' => 'Income per Source Account'],
+                    ['dataKey' => 'expensesPerDestinationAccountChartData', 'title' => 'Expenses per Destination Account'],
+                    ['dataKey' => 'incomePerDestinationAccountChartData', 'title' => 'Income per Destination Account'],
+                ];
+                
+                foreach ($pieChartConfigs as $config) {
+                    $chartData = $validatedData[$config['dataKey']] ?? [];
+                    $pieData = [];
+                    if (count($chartData) > 1) {
+                        for ($i = 1; $i < count($chartData); $i++) if (isset($chartData[$i][0], $chartData[$i][1])) $pieData[] = [(string)$chartData[$i][0], (float)$chartData[$i][1]];
+                    }
+                    
+                    $col = $pieChartColumns[$currentChartColIndex];
+                    $topLeftPosition = $col . $currentChartRow;
+
+                    if (!empty($pieData)) {
+                        $imagePath = $this->generateChartImage('pie', 'exprev_pie_' . $currentChartColIndex . '_' . time() . rand(100, 999), $pieData, [], $config['title'], 450, $pieImageHeight);
+                        if ($imagePath) {
+                            $this->addChartImageToSheet($mainSheet, $imagePath, $config['title'], $topLeftPosition, $pieImageHeight);
+                        } else {
+                            $mainSheet->setCellValue($topLeftPosition, "Error generating chart: " . $config['title']);
+                        }
+                    } else {
+                        $mainSheet->setCellValue($topLeftPosition, "No data for chart: " . $config['title']);
+                    }
+
+                    $currentChartColIndex++;
+                    if ($currentChartColIndex >= count($pieChartColumns)) {
+                        $currentChartColIndex = 0;
+                        $currentChartRow += $this->calculateChartHeightInRows($pieImageHeight);
+                    }
+                }
+                
+                if ($currentChartColIndex != 0) $currentChartRow += $this->calculateChartHeightInRows($pieImageHeight);
+                $currentRow = $currentChartRow + 2;
+
+                // 4. Generate Multi-Series Bar Charts
+                $barChartsTagData = $validatedData['barChartsPerTagData'] ?? [];
+                $barImageHeight = 350;
+                foreach ($barChartsTagData as $index => $chartData) {
+                    $barTitle = $chartData['title'] ?? 'Income and expenses';
+                    $categoriesDataSource = $chartData['categories'] ?? [];
+                    $barSeriesData = $chartData['series'] ?? [];
+
+                    $barXLabels = [];
+                    if(count($categoriesDataSource)>1) for($i=1; $i<count($categoriesDataSource); $i++) $barXLabels[] = (string)($categoriesDataSource[$i][0] ?? 'N/A');
+                    
+                    if(!empty($barXLabels) && !empty($barSeriesData)){
+                        $imagePathBar = $this->generateChartImage('bar','exprev_bar'.$index.'_'.time().rand(100,999), $barSeriesData, $barXLabels, $barTitle, 700, $barImageHeight);
+                        if($imagePathBar) { 
+                            $this->addChartImageToSheet($mainSheet, $imagePathBar, $barTitle, 'A'.$currentRow, $barImageHeight); 
+                            $currentRow += $this->calculateChartHeightInRows($barImageHeight); 
+                        } else { 
+                            $mainSheet->setCellValue('A'.$currentRow, "Error generating chart: {$barTitle}"); $currentRow+=2; 
+                        }
+                    } else { 
+                        $mainSheet->setCellValue('A'.$currentRow, "No data for chart: {$barTitle}"); $currentRow+=2; 
+                    }
+                    $currentRow++;
+                }
+            }
+            
+            // 5. Finalize and save the PDF
+            $highestColumn = $mainSheet->getHighestDataColumn();
+            if ($highestColumn && $highestColumn >= 'A') {
+                foreach (range('A', $highestColumn) as $col) {
+                    $mainSheet->getColumnDimension($col)->setAutoSize(true);
+                }
+            }
+
+            $writer = new Mpdf($spreadsheet);
+            $filename = 'expense_revenue_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            $storageDir = function_exists('storage_path') ? storage_path('app/reports') : __DIR__.'/../../storage/app/reports';
+            if (!is_dir($storageDir)) { @mkdir($storageDir, 0755, true); }
+            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
+            $writer->save($filePath);
+
+            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/exprev_*.png');
+
+            return response()->json([
+                'message' => 'Expense/Revenue report generated successfully.',
+                'filename' => $filename,
+                'path' => $filePath
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error("Exception in GenerateExpenseRevenueReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
+            return response()->json(['error' => 'Error generating expense/revenue report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
         }
     }
 }
