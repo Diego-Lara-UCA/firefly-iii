@@ -996,7 +996,6 @@ Route::group(
     }
 );
 
-
 // Export reports to xlsx file API routes
 Route::group(
     [
@@ -1008,10 +1007,13 @@ Route::group(
         Route::post('default-report', ['uses' => 'ReportExportController@DefaultReport', 'as' => 'default-report']);
         Route::post('transaction-history-report', ['uses' => 'ReportExportController@TransactionHistoryReport', 'as' => 'transaction-history-report']);
         Route::post('budget-report', ['uses' => 'ReportExportController@BudgetReport', 'as' => 'budget-report']);
+        Route::post('category-report', ['uses' => 'ReportExportController@CategoryReport', 'as' => 'category-report']);
+        Route::post('tag-report', ['uses' => 'ReportExportController@TagReport', 'as' => 'tag-report']);
+        Route::post('expense-revenue-report', ['uses' => 'ReportExportController@ExpenseRevenueReport', 'as' => 'expense-revenue-report']);
     }
 );
 
-// Export report API routes
+// Export reports to pdf file API routes
 Route::group(
     [
         'namespace' => 'FireflyIII\Api\V1\Controllers\Data\Export\PDF',
@@ -1022,5 +1024,8 @@ Route::group(
         Route::post('default-report', ['uses' => 'ReportExportController@DefaultReport', 'as' => 'default-report']);
         Route::post('transaction-history-report', ['uses' => 'ReportExportController@TransactionHistoryReport', 'as' => 'transaction-history-report']);
         Route::post('budget-report', ['uses' => 'ReportExportController@BudgetReport', 'as' => 'budget-report']);
+        Route::post('category-report', ['uses' => 'ReportExportController@CategoryReport', 'as' => 'category-report']);
+        Route::post('tag-report', ['uses' => 'ReportExportController@TagReport', 'as' => 'tag-report']);
+        Route::post('expense-revenue-report', ['uses' => 'ReportExportController@ExpenseRevenueReport', 'as' => 'expense-revenue-report']);
     }
 );
