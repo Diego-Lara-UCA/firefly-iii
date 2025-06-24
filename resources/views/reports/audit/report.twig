@@ -6,6 +6,11 @@
 
 {% block content %}
 
+     <div class="row">
+        <div class="col-lg-12 col-md-12 col-sm-12">
+            {% include 'reports.partials.export_button' %}
+        </div>
+    </div>
     <div class="row no-print">
         <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
             <div class="box" id="optionsBox">
@@ -86,7 +91,156 @@
 {% block scripts %}
     <script type="text/javascript" nonce="{{ JS_NONCE }}">
         var hideable = {{ hideable|json_encode|raw }};
+
+        // URLs for export endpoints
+        var exportXlsTransactionHistoryReportUrl = '{{ route('api.v1.data.export.xls.transaction-history-report') }}';
+        var exportPdfTransactionHistoryReportUrl = '{{ route('api.v1.data.export.pdf.transaction-history-report') }}';
     </script>
     <script type="text/javascript" src="v1/js/ff/reports/all.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
     <script type="text/javascript" src="v1/js/ff/reports/audit/all.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
+    <script type="text/javascript" nonce="{{ JS_NONCE }}">
+        var exportInProgress = false;
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            const bgColor = type === 'success' ? '#28a745' : '#dc3545'; // Green for success, Red for error
+
+            Object.assign(toast.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '15px 20px',
+                backgroundColor: bgColor,
+                color: 'white',
+                borderRadius: '5px',
+                zIndex: '1050',
+                opacity: '0',
+                transform: 'translateY(-20px)',
+                transition: 'opacity 0.3s, transform 0.3s',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+            });
+
+            document.body.appendChild(toast);
+
+            // Fade and slide in
+            setTimeout(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateY(0)';
+            }, 100);
+
+            // Fade and slide out
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 4000);
+        }
+
+        function handleExport(exportType, xlsUrl, pdfUrl, dataCollector, $button) {
+            if (exportInProgress) return;
+            exportInProgress = true;
+
+            var originalText = $button.html();
+            $button.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
+
+            setTimeout(() => {
+                try {
+                    const exportData = dataCollector();
+                    console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
+
+                    const exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
+                    const fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+
+                    $.ajax({
+                        url: exportUrl,
+                        type: 'POST',
+                        contentType: 'application/json; charset=utf-8',
+                        data: JSON.stringify(exportData),
+                        dataType: 'json',
+                        success: function(response) {
+                            if (response.filename && response.path) {
+                                showToast(`El informe ${fileTypeMessage} se ha generado en el servidor.`, 'success');
+                            } else {
+                                showToast(`Error: El servidor no devolvió la información del archivo ${fileTypeMessage} esperada.`, 'error');
+                            }
+                        },
+                        error: function(jqXHR, textStatus, errorThrown) {
+                            showToast(`Error al generar el informe ${fileTypeMessage}. Consulta la consola para más detalles.`, 'error');
+                        },
+                        complete: function() {
+                            $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                            exportInProgress = false;
+                        }
+                    });
+                } catch (e) {
+                    console.error("Error durante la recolección de datos:", e);
+                    showToast("Error durante la recolección de datos. Revisa la consola.", 'error');
+                    $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                    exportInProgress = false;
+                }
+            }, 10);
+        }
+
+        function collectAuditReportData() {
+            const allRows = [];
+            $('.box').not('#optionsBox').find('table').each(function() {
+                $(this).find('tbody tr').each(function() {
+                    const row = [];
+                    $(this).find('td').each(function() {
+                        row.push($(this).text().trim());
+                    });
+                    if(row.length > 0) {
+                        allRows.push(row);
+                    }
+                });
+            });
+
+            const exportData = {
+                accountBalanceTableData: allRows,
+                creditCardChartAccountName: "",
+                creditCardChartDateRange: "",
+                creditCardChartDateLabels: [],
+                creditCardChartDebtValues: [],
+                cashWalletChartDateLabels: [],
+                cashWalletChartMoneyValues: []
+            };
+
+            return exportData;
+        }
+
+        var initialAjaxCompleted = false;
+        function setupExportClickHandlers() {
+            if (initialAjaxCompleted) return;
+            initialAjaxCompleted = true;
+            
+            $('#exportXlsLink').off('click').on('click', function(e) {
+                e.preventDefault();
+                handleExport('xls', exportXlsTransactionHistoryReportUrl, exportPdfTransactionHistoryReportUrl, collectAuditReportData, $(this));
+            });
+
+            $('#exportPdfLink').off('click').on('click', function(e) {
+                e.preventDefault();
+                handleExport('pdf', exportXlsTransactionHistoryReportUrl, exportPdfTransactionHistoryReportUrl, collectAuditReportData, $(this));
+            });
+            console.log("Manejadores de clic para informes de auditoría adjuntados.");
+        }
+
+        $(document).ajaxStop(function() {
+            setupExportClickHandlers();
+        });
+        
+        $(document).ready(function() {
+            setTimeout(function() {
+                if (!initialAjaxCompleted) {
+                     console.warn("ajaxStop no se disparó, adjuntando manejadores de clic directamente.");
+                     setupExportClickHandlers();
+                }
+            }, 2000);
+        });
+    </script>
 {% endblock %}

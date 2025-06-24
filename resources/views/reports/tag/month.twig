@@ -7,6 +7,12 @@
 {% block content %}
 
     <div class="row">
+        <div class="col-lg-12 col-md-12 col-sm-12">
+            {% include 'reports.partials.export_button' %}
+        </div>
+    </div>
+
+    <div class="row">
         <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12">
             <div class="box">
                 <div class="box-header with-border">
@@ -279,8 +285,242 @@
         var avgIncomeUrl = '{{ route('report-data.tag.avg-income', [accountIds, tagIds, start.format('Ymd'), end.format('Ymd')]) }}';
         var topIncomeUrl = '{{ route('report-data.tag.top-income', [accountIds, tagIds, start.format('Ymd'), end.format('Ymd')]) }}';
 
+        // URL para el endpoint de exportación XLS (generación del archivo)
+        var exportXlsTagReportUrl = '{{ route('api.v1.data.export.xls.tag-report') }}';
+        // URL para el endpoint de exportación PDF (generación del archivo)
+        var exportPdfTagReportUrl = '{{ route('api.v1.data.export.pdf.tag-report') }}';
+
     </script>
     <script type="text/javascript" src="v1/js/ff/reports/tag/month.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
+
+    <script type="text/javascript" nonce="{{ JS_NONCE }}">
+        var exportInProgress = false;
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            const bgColor = type === 'success' ? '#28a745' : '#dc3545'; // Green for success, Red for error
+
+            Object.assign(toast.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '15px 20px',
+                backgroundColor: bgColor,
+                color: 'white',
+                borderRadius: '5px',
+                zIndex: '1050',
+                opacity: '0',
+                transform: 'translateY(-20px)',
+                transition: 'opacity 0.3s, transform 0.3s',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+            });
+
+            document.body.appendChild(toast);
+
+            // Fade and slide in
+            setTimeout(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateY(0)';
+            }, 100);
+
+            // Fade and slide out
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 4000);
+        }
+
+        function parseHtmlTable(tableContainerId) {
+            const data = [];
+            const $table = $(`#${tableContainerId}`).find('table');
+            if ($table.length === 0) {
+                console.warn(`[${tableContainerId}] No se encontró la tabla.`);
+                return data;
+            }
+
+            $table.find('tbody tr, tfoot tr').each(function() {
+                const row = [];
+                $(this).find('td').each(function() {
+                    let cellText = $(this).text().trim();
+                    row.push(cellText);
+                });
+                if (row.length > 0) {
+                    data.push(row);
+                }
+            });
+            return data;
+        }
+
+        function getChartData(chartInstance) {
+            if (!chartInstance || !chartInstance.data || !chartInstance.data.labels || !chartInstance.data.datasets) {
+                return [];
+            }
+            const labels = chartInstance.data.labels;
+            const data = chartInstance.data.datasets[0].data;
+            const result = [];
+            labels.forEach((label, index) => {
+                result.push([label, data[index]]);
+            });
+            return result;
+        }
+
+        function getBarChartData(chartInstance) {
+            if (!chartInstance || !chartInstance.data || !chartInstance.data.labels || !chartInstance.data.datasets || chartInstance.data.datasets.length === 0) {
+                return { categories: [], series: [] };
+            }
+            const labels = chartInstance.data.labels;
+            const datasets = chartInstance.data.datasets;
+
+            const categories = [['Month'], ...labels.map(l => [l])];
+            
+            const series = [];
+            datasets.forEach(dataset => {
+                const dataPoints = dataset.data.map(value => (value.y ? value.y : value));
+                series.push([dataset.label, dataPoints]);
+            });
+
+            return { categories: categories, series: series };
+        }
+
+        function handleExport(exportType, xlsUrl, pdfUrl, dataCollector, $button) {
+            if (exportInProgress) return;
+            exportInProgress = true;
+
+            var originalText = $button.html();
+            $button.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
+
+            setTimeout(() => {
+                try {
+                    const exportData = dataCollector();
+                    console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
+
+                    const exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
+                    const fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+
+                    $.ajax({
+                        url: exportUrl,
+                        type: 'POST',
+                        contentType: 'application/json; charset=utf-8',
+                        data: JSON.stringify(exportData),
+                        dataType: 'json',
+                        success: function(response) {
+                            if (response.filename && response.path) {
+                                showToast(`El informe ${fileTypeMessage} se ha generado en el servidor.`, 'success');
+                            } else {
+                                showToast(`Error: El servidor no devolvió la información del archivo ${fileTypeMessage} esperada.`, 'error');
+                            }
+                        },
+                        error: function(jqXHR, textStatus, errorThrown) {
+                            showToast(`Error al generar el informe ${fileTypeMessage}. Consulta la consola para más detalles.`, 'error');
+                        },
+                        complete: function() {
+                            $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                            exportInProgress = false;
+                        }
+                    });
+                } catch (e) {
+                    console.error("Error durante la recolección de datos:", e);
+                    showToast("Error durante la recolección de datos. Revisa la consola.", 'error');
+                    $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                    exportInProgress = false;
+                }
+            }, 10);
+        }
+
+        function collectTagReportData() {
+            const exportData = {
+                accountsTableData: parseHtmlTable('accountsHolder'),
+                tagsTableData: parseHtmlTable('tagsHolder'),
+                accountPerTagTableHeaders: [],
+                accountPerTagTableData: parseHtmlTable('accountPerTagHolder'),
+                avgExpenseDestAccountTableData: parseHtmlTable('avgExpensesHolder'),
+                avgEarningSourceAccountTableData: parseHtmlTable('avgIncomeHolder'),
+                topExpensesTableData: parseHtmlTable('topExpensesHolder'),
+                topRevenueTableData: parseHtmlTable('topIncomeHolder'),
+                expensePerTagChartData: [],
+                expensePerCategoryChartData: [],
+                incomePerCategoryChartData: [],
+                expensePerBudgetChartData: [],
+                expensesPerSourceAccountChartData: [],
+                incomePerSourceAccountChartData: [],
+                expensesPerDestinationAccountChartData: [],
+                incomePerDestinationAccountChartData: [],
+                barChartsPerTagData: []
+            };
+
+            const $accountPerTagTable = $('#accountPerTagHolder').find('table');
+            $accountPerTagTable.find('thead tr th').each(function() {
+                exportData.accountPerTagTableHeaders.push($(this).text().trim());
+            });
+
+            if (window.tagOutPieChart) exportData.expensePerTagChartData = [['Tag', 'Amount'], ...getChartData(window.tagOutPieChart)];
+            if (window.categoryOutPieChart) exportData.expensePerCategoryChartData = [['Category', 'Amount'], ...getChartData(window.categoryOutPieChart)];
+            if (window.categoryInPieChart) exportData.incomePerCategoryChartData = [['Category', 'Amount'], ...getChartData(window.categoryInPieChart)];
+            if (window.budgetsOutPieChart) exportData.expensePerBudgetChartData = [['Budget', 'Amount'], ...getChartData(window.budgetsOutPieChart)];
+            if (window.sourceOutPieChart) exportData.expensesPerSourceAccountChartData = [['Source Account', 'Amount'], ...getChartData(window.sourceOutPieChart)];
+            if (window.sourceInPieChart) exportData.incomePerSourceAccountChartData = [['Source Account', 'Amount'], ...getChartData(window.sourceInPieChart)];
+            if (window.destOutPieChart) exportData.expensesPerDestinationAccountChartData = [['Destination Account', 'Amount'], ...getChartData(window.destOutPieChart)];
+            if (window.destInPieChart) exportData.incomePerDestinationAccountChartData = [['Destination Account', 'Amount'], ...getChartData(window.destInPieChart)];
+
+            $('.main_tag_canvas').each(function() {
+                const canvas = this;
+                const chartInstance = Chart.getChart(canvas);
+                if (chartInstance) {
+                    const $box = $(canvas).closest('.box');
+                    const title = $box.find('.box-title').text().trim();
+                    const tagNameMatch = title.match(/\(([^)]+)\)/);
+                    const tagName = tagNameMatch ? tagNameMatch[1] : 'Unknown Tag';
+                    
+                    const chartData = getBarChartData(chartInstance);
+
+                    exportData.barChartsPerTagData.push({
+                        tagName: tagName,
+                        title: title,
+                        categories: chartData.categories,
+                        series: chartData.series
+                    });
+                }
+            });
+
+            return exportData;
+        }
+
+        var initialAjaxCompleted = false;
+        function setupExportClickHandlers() {
+            if (initialAjaxCompleted) return;
+            initialAjaxCompleted = true;
+            
+            $('#exportXlsLink').off('click').on('click', function(e) {
+                e.preventDefault();
+                handleExport('xls', exportXlsTagReportUrl, exportPdfTagReportUrl, collectTagReportData, $(this));
+            });
+
+            $('#exportPdfLink').off('click').on('click', function(e) {
+                e.preventDefault();
+                handleExport('pdf', exportXlsTagReportUrl, exportPdfTagReportUrl, collectTagReportData, $(this));
+            });
+            console.log("Manejadores de clic para informes de etiquetas adjuntados.");
+        }
+
+        $(document).ajaxStop(function() {
+            setupExportClickHandlers();
+        });
+        
+        $(document).ready(function() {
+            setTimeout(function() {
+                if (!initialAjaxCompleted) {
+                     console.warn("ajaxStop no se disparó, adjuntando manejadores de clic directamente.");
+                     setupExportClickHandlers();
+                }
+            }, 2000);
+        });
+    </script>
 
 {% endblock %}
 
