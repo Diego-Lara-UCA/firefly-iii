@@ -307,21 +307,16 @@ class ExportPdfData
     public function GenerateDefaultReport (DefaultReportExportRequest $request): JsonResponse {
         try {
             $validatedData = $request->validated();
-            $spreadsheet = new Spreadsheet();
-            $sheet = $spreadsheet->getActiveSheet();
             $reportTitle = 'Default Financial Report';
-            $sheet->setTitle('DefaultReport');
-            $this->setupPdfLayout($spreadsheet, $reportTitle);
-            $currentRow = 1;
-            $this->addReportHeader($sheet, $currentRow, $reportTitle);
 
-            if (!$this->pChartPrerequisitesMet) {
-                $sheet->setCellValue('A'.$currentRow, "Chart configuration incomplete. Check server logs.");
-            } else {
+            // 1. Generar la imagen del gráfico (si hay datos)
+            $chartImagePath = null;
+            if ($this->pChartPrerequisitesMet) {
                 $chartDateLabelsSource = $validatedData['chartDateLabels'] ?? [];
                 $chartBalanceValuesSource = $validatedData['chartBalanceValues'] ?? [];
                 $cpChartXLabels = [];
                 if (count($chartDateLabelsSource) > 1) for ($i = 1; $i < count($chartDateLabelsSource); $i++) $cpChartXLabels[] = (string)($chartDateLabelsSource[$i][0] ?? 'N/A');
+                
                 $cpChartSeriesData = [];
                 if (isset($chartBalanceValuesSource[0][0]) && count($chartBalanceValuesSource) > 1) {
                     $serieName = (string)($chartBalanceValuesSource[0][0] ?? 'Balance'); $values = [];
@@ -330,34 +325,57 @@ class ExportPdfData
                 }
 
                 if (!empty($cpChartXLabels) && !empty($cpChartSeriesData)) {
-                    $chartTitle = 'Account Balances'; $imageHeight = 250;
-                    $imagePath = $this->generateChartImage('line', 'def_line_'.time().rand(100,999), $cpChartSeriesData, $cpChartXLabels, $chartTitle, 750, $imageHeight);
-                    $this->addChartImageToSheet($sheet, $imagePath, $chartTitle, 'B'.$currentRow, $imageHeight);
-                    $currentRow += $this->calculateChartHeightInRows($imageHeight);
-                } else { $sheet->setCellValue('A'.$currentRow, "No data for chart: Account Balances"); $currentRow += 2; }
+                    $imagePath = $this->generateChartImage('line', 'def_line_'.time().rand(100,999), $cpChartSeriesData, $cpChartXLabels, 'Account Balances', 750, 250);
+                    if ($imagePath) {
+                        $chartImagePath = $imagePath;
+                    }
+                }
             }
-            $currentRow++;
 
-            $this->createStyledTable($sheet, $currentRow, "Account Balances", ["Name", "Balance at start of period", "Balance at end of period", "Difference"], $validatedData['accountBalancesTableData'] ?? []);
-            $this->createStyledTable($sheet, $currentRow, "Income vs Expenses", ["Currency", "In", "Out", "Difference"], $validatedData['incomeVsExpensesTableData'] ?? []);
-            $this->createStyledTable($sheet, $currentRow, "Revenue/Income", ["Name", "Total", "Average"], $validatedData['revenueIncomeTableData'] ?? []);
-            $this->createStyledTable($sheet, $currentRow, "Expenses", ["Name", "Total", "Average"], $validatedData['expensesTableData'] ?? []);
-            $this->createStyledTable($sheet, $currentRow, "Budgets", ["Budget", "Date", "Budgeted", "pct (%)", "Spent", "pct (%)", "Left", "Overspent"], $validatedData['budgetsTableData'] ?? []);
-            $this->createStyledTable($sheet, $currentRow, "Categories", ["Category", "Spent", "Earned", "Sum"], $validatedData['categoriesTableData'] ?? []);
-            $this->createStyledTable($sheet, $currentRow, "Budget (split by account)", ["Budget", "Sum"], $validatedData['budgetSplitAccountTableData'] ?? [], true);
-            $this->createStyledTable($sheet, $currentRow, "Subscriptions", ["Name", "Minimum amount", "Maximum amount", "Expected on", "Paid"], $validatedData['subscriptionsTableData'] ?? []);
+            // Helper para asegurar que todas las filas tengan el mismo número de columnas que los encabezados.
+            $normalizeTableData = function (array $data, int $numHeaders): array {
+                return array_map(function ($row) use ($numHeaders) {
+                    $row = (array) $row;
+                    $cellCount = count($row);
+                    if ($cellCount < $numHeaders) {
+                        return array_pad($row, $numHeaders, '');
+                    }
+                    return array_slice($row, 0, $numHeaders);
+                }, $data);
+            };
 
-            for ($col = 'A'; $col <= 'J'; $col++) $sheet->getColumnDimension($col)->setAutoSize(true);
-            $writer = new Mpdf($spreadsheet);
+            // 2. Renderizar la plantilla Blade a HTML
+            $html = view('pdf.default_report', [
+                'reportTitle' => $reportTitle,
+                'chartImagePath' => $chartImagePath,
+                'accountBalancesTableData' => $normalizeTableData($validatedData['accountBalancesTableData'] ?? [], 4),
+                'incomeVsExpensesTableData' => $normalizeTableData($validatedData['incomeVsExpensesTableData'] ?? [], 4),
+                'revenueIncomeTableData' => $normalizeTableData($validatedData['revenueIncomeTableData'] ?? [], 3),
+                'expensesTableData' => $normalizeTableData($validatedData['expensesTableData'] ?? [], 3),
+                'budgetsTableData' => $normalizeTableData($validatedData['budgetsTableData'] ?? [], 8),
+                'categoriesTableData' => $normalizeTableData($validatedData['categoriesTableData'] ?? [], 4),
+                'budgetSplitAccountTableData' => $normalizeTableData($validatedData['budgetSplitAccountTableData'] ?? [], 2),
+                'subscriptionsTableData' => $normalizeTableData($validatedData['subscriptionsTableData'] ?? [], 5),
+            ])->render();
+
+            // 3. Generar el PDF desde el HTML con Mpdf
+            $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
+            $mpdf->WriteHTML($html);
+
+            // 4. Guardar el archivo PDF
             $filename = 'default_report_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = function_exists('storage_path') ? storage_path('app/reports') : __DIR__.'/../../storage/app/reports';
+            $storageDir = storage_path('app/reports');
             if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
             $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $writer->save($filePath);
+            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
+
+            // 5. Limpiar imágenes temporales
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/def_*.png');
+
             return response()->json(['message' => 'PDF report saved.', 'filename' => $filename, 'path' => $filePath], 200);
+
         } catch (\Throwable $e) {
-            Log::error("PDF DefaultReport (c-pchart): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
+            Log::error("PDF DefaultReport (HTML Template): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
             return response()->json(['error' => 'PDF Error.', 'details' => $e->getMessage()], 500);
         }
     }
