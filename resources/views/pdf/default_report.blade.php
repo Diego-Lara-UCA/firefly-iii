@@ -1,4 +1,3 @@
-{{-- filepath: c:\Users\mosca\Escritorio\Ciclo 01-25\ACA\firefly-iii\resources\views\pdf\default_report.blade.php --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>
