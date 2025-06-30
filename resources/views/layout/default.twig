@@ -257,6 +257,8 @@
     <script type="text/javascript" src="v1/js/ff/intro/intro.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
 {% endif %}
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" nonce="{{ JS_NONCE }}"></script>
+
 {% block scripts %}{% endblock %}
 
 {% if config('firefly.tracker_site_id') != '' and config('firefly.tracker_url') != '' %}

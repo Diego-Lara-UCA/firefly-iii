@@ -418,33 +418,63 @@
             var originalText = $button.html();
             $button.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
 
-            // Use a timeout to allow the UI to update (show spinner) before heavy data collection
             setTimeout(() => {
                 try {
-                    const exportData = dataCollector();
+                    var exportData = dataCollector();
                     console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
 
-                    const exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
-                    const fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+                    var exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
+                    var fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+                    var fileTypeExtension = exportType === 'xls' ? '.xlsx' : '.pdf';
 
                     $.ajax({
                         url: exportUrl,
                         type: 'POST',
-                        contentType: 'application/json; charset=utf-8',
                         data: JSON.stringify(exportData),
-                        dataType: 'json',
-                        success: function(response) {
-                            if (response.filename && response.path) {
-                                console.log(`Informe ${fileTypeMessage} generado en el servidor:`, response.filename, 'en la ruta:', response.path);
-                                showToast(`El informe ${fileTypeMessage} se ha generado en el servidor.`, 'success');
-                            } else {
-                                console.error('Respuesta inesperada del servidor:', response);
-                                showToast(`Error: El servidor no devolvió la información del archivo ${fileTypeMessage} esperada.`, 'error');
-                            }
+                        contentType: 'application/json; charset=utf-8',
+                        headers: {
+                            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
                         },
-                        error: function(jqXHR, textStatus, errorThrown) {
-                            console.error(`Error en la generación del ${fileTypeMessage}:`, textStatus, errorThrown, jqXHR.responseText);
-                            showToast(`Error al generar el informe ${fileTypeMessage}. Consulta la consola para más detalles.`, 'error');
+                        processData: false,
+                        xhrFields: {
+                            responseType: 'blob'
+                        },
+                        success: function(data, status, xhr) {
+                            console.log('Respuesta recibida correctamente, Content-Type:', xhr.getResponseHeader('Content-Type'));
+                            const contentType = xhr.getResponseHeader('Content-Type');
+                            if (contentType && (contentType.includes('text/html') || contentType.includes('text/plain'))) {
+                                const reader = new FileReader();
+                                reader.onload = function() {
+                                    showToast(`Error inesperado. El servidor respondió con HTML en lugar de ${fileTypeMessage}. Revisa la consola.`, 'error');
+                                    console.error('Contenido de la respuesta HTML:', reader.result);
+                                };
+                                reader.readAsText(data);
+                                return;
+                            }
+                            const blob = new Blob([data], {type: contentType || 'application/' + exportType});
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            const contentDisposition = xhr.getResponseHeader('Content-Disposition');
+                            let fileName = 'reporte_' + moment().format('YYYYMMDD_HHmmss') + fileTypeExtension;
+                            if (contentDisposition) {
+                                const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                                if (fileNameMatch && fileNameMatch[1]) {
+                                    fileName = fileNameMatch[1].replace(/['"]/g, '');
+                                }
+                            }
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => {
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                            }, 100);
+                            showToast(`El informe ${fileTypeMessage} se está descargando.`, 'success');
+                        },
+                        error: function(xhr, status, error) {
+                            console.error('Error en la exportación:', error);
+                            showToast('Error al generar el informe.', 'error');
                         },
                         complete: function() {
                             $button.removeClass('disabled').prop('disabled', false).html(originalText);
@@ -626,35 +656,19 @@
             return exportData;
         }
 
-        var initialAjaxCompleted = false;
-        function setupExportClickHandlers() {
-            if (initialAjaxCompleted) return;
-            initialAjaxCompleted = true;
-            
-            $('#exportXlsLink').off('click').on('click', function(e) {
+        $(function() {
+            $(document).on('click', '#exportXlsLink', function(e) {
                 e.preventDefault();
+                e.stopPropagation();
+                console.log('Click export XLS');
                 handleExport('xls', exportXlsDefaultReportUrl, exportPdfDefaultReportUrl, collectDefaultReportData, $(this));
             });
-
-            $('#exportPdfLink').off('click').on('click', function(e) {
+            $(document).on('click', '#exportPdfLink', function(e) {
                 e.preventDefault();
+                e.stopPropagation();
+                console.log('Click export PDF');
                 handleExport('pdf', exportXlsDefaultReportUrl, exportPdfDefaultReportUrl, collectDefaultReportData, $(this));
             });
-            console.log("Manejadores de clic para procesamiento XLS y PDF adjuntados.");
-        }
-
-        $(document).ajaxStop(function() {
-            setupExportClickHandlers();
         });
-        
-        $(document).ready(function() {
-            setTimeout(function() {
-                if (!initialAjaxCompleted) {
-                     console.warn("ajaxStop no se disparó, adjuntando manejador de clic para XLS y PDF directamente.");
-                     setupExportClickHandlers();
-                }
-            }, 2000);
-        });
-
     </script>
 {% endblock %}

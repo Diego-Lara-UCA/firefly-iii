@@ -329,22 +329,56 @@
 
                     const exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
                     const fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+                    const fileTypeExtension = exportType === 'xls' ? '.xlsx' : '.pdf';
 
                     $.ajax({
                         url: exportUrl,
                         type: 'POST',
-                        contentType: 'application/json; charset=utf-8',
                         data: JSON.stringify(exportData),
-                        dataType: 'json',
-                        success: function(response) {
-                            if (response.filename && response.path) {
-                                showToast(`El informe ${fileTypeMessage} se ha generado en el servidor.`, 'success');
-                            } else {
-                                showToast(`Error: El servidor no devolvió la información del archivo ${fileTypeMessage} esperada.`, 'error');
+                        contentType: 'application/json; charset=utf-8',
+                        headers: {
+                            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                        },
+                        processData: false,
+                        xhrFields: {
+                            responseType: 'blob'
+                        },
+                        success: function(data, status, xhr) {
+                            console.log('Respuesta recibida correctamente, Content-Type:', xhr.getResponseHeader('Content-Type'));
+                            const contentType = xhr.getResponseHeader('Content-Type');
+                            if (contentType && (contentType.includes('text/html') || contentType.includes('text/plain'))) {
+                                const reader = new FileReader();
+                                reader.onload = function() {
+                                    showToast(`Error inesperado. El servidor respondió con HTML en lugar de ${fileTypeMessage}. Revisa la consola.`, 'error');
+                                    console.error('Contenido de la respuesta HTML:', reader.result);
+                                };
+                                reader.readAsText(data);
+                                return;
                             }
+                            const blob = new Blob([data], {type: contentType || 'application/' + exportType});
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            const contentDisposition = xhr.getResponseHeader('Content-Disposition');
+                            let fileName = 'reporte_' + moment().format('YYYYMMDD_HHmmss') + fileTypeExtension;
+                            if (contentDisposition) {
+                                const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                                if (fileNameMatch && fileNameMatch[1]) {
+                                    fileName = fileNameMatch[1].replace(/['"]/g, '');
+                                }
+                            }
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => {
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                            }, 100);
+                            showToast(`El informe ${fileTypeMessage} se está descargando.`, 'success');
                         },
                         error: function(jqXHR, textStatus, errorThrown) {
                             showToast(`Error al generar el informe ${fileTypeMessage}. Consulta la consola para más detalles.`, 'error');
+                            console.error(`Error en la generación del ${fileTypeMessage}:`, textStatus, errorThrown);
                         },
                         complete: function() {
                             $button.removeClass('disabled').prop('disabled', false).html(originalText);
@@ -389,7 +423,16 @@
 
             $('.main_budget_canvas').each(function() {
                 const canvas = this;
-                const chartInstance = Chart.getChart(canvas);
+                // Chart.js v2.x: instancia suele estar en canvas.chart o canvas.__chartjsInstance
+                let chartInstance = null;
+                if (canvas.chart) {
+                    chartInstance = canvas.chart;
+                } else if (canvas.__chartjsInstance) {
+                    chartInstance = canvas.__chartjsInstance;
+                } else if (window.Chart && Chart.instances) {
+                    // Chart.js v2.x mantiene un array de instancias
+                    chartInstance = Object.values(Chart.instances).find(inst => inst.chart.canvas === canvas);
+                }
                 if (chartInstance) {
                     const $box = $(canvas).closest('.box');
                     const title = $box.find('.box-title').text().trim();
@@ -445,3 +488,4 @@
 {% block styles %}
     <link rel="stylesheet" href="v1/css/bootstrap-sortable.css?v={{ FF_VERSION }}" type="text/css" media="all" nonce="{{ JS_NONCE }}">
 {% endblock %}
+
