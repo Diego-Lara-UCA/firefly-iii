@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace FireflyIII\Support\Export;
 
 use Carbon\Carbon;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use CpChart\Data as pData;
@@ -17,6 +16,7 @@ use FireflyIII\Api\V1\Requests\Data\Export\TransactionHistoryExportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\CategoryReportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\TagReportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\ExpenseRevenueReportRequest;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 if (!defined('CHART_TEMP_DIR_CPCHART')) {
     $chartTempBasePath = function_exists('storage_path') ? storage_path('app' . DIRECTORY_SEPARATOR . 'temp_charts_cpchart') : rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'temp_charts_cpchart';
@@ -36,7 +36,6 @@ class ExportPdfData
 
     public function __construct()
     {
-        // ... igual que antes, chequeos de prerequisites (omitidos por brevedad)
         if (!is_dir(CHART_TEMP_DIR_CPCHART) && !@mkdir(CHART_TEMP_DIR_CPCHART, 0775, true) && !is_dir(CHART_TEMP_DIR_CPCHART)) {
             Log::critical('CRITICAL c-pchart: Failed to create temporary directory: ' . CHART_TEMP_DIR_CPCHART);
             return;
@@ -167,7 +166,6 @@ class ExportPdfData
         foreach ($files as $file) if (is_file($file)) @unlink($file);
     }
 
-    // Normalizer helper for table data
     private function normalizeTableData(array $data, int $numHeaders): array {
         return array_map(function ($row) use ($numHeaders) {
             $row = (array) $row;
@@ -179,7 +177,7 @@ class ExportPdfData
         }, $data);
     }
 
-    public function GenerateDefaultReport(DefaultReportExportRequest $request): JsonResponse {
+    public function GenerateDefaultReport(DefaultReportExportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Default Financial Report';
@@ -228,20 +226,21 @@ class ExportPdfData
 
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/def_*.png');
 
-            return response()->json(['message' => 'PDF report saved.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/pdf'
+            ])->deleteFileAfterSend(true);
 
         } catch (\Throwable $e) {
             Log::error("PDF DefaultReport (HTML Template): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
-            return response()->json(['error' => 'PDF Error.', 'details' => $e->getMessage()], 500);
+            abort(500, 'PDF Error: ' . $e->getMessage());
         }
     }
 
-    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): JsonResponse {
+    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Transaction History Report';
 
-            // Gráficos
             $ccChartImagePath = null;
             $ccChartTitle = null;
             if ($this->pChartPrerequisitesMet) {
@@ -300,14 +299,16 @@ class ExportPdfData
             $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
 
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/trans_*.png');
-            return response()->json(['message' => 'PDF report saved.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/pdf'
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $e) {
             Log::error("PDF TransactionReport (Blade): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
-            return response()->json(['error' => 'PDF Error.', 'details' => $e->getMessage()], 500);
+            abort(500, 'PDF Error: ' . $e->getMessage());
         }
     }
 
-    public function GenerateBudgetReport(BudgetExportRequest $request): JsonResponse {
+    public function GenerateBudgetReport(BudgetExportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Budget Report';
@@ -330,15 +331,16 @@ class ExportPdfData
             $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
 
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/budget_*.png');
-            return response()->json(['message' => 'PDF report saved.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/pdf'
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $e) {
             Log::error("PDF BudgetReport (Blade): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
-            return response()->json(['error' => 'PDF Error.', 'details' => $e->getMessage()], 500);
+            abort(500, 'PDF Error: ' . $e->getMessage());
         }
     }
 
-    public function GenerateCategoryReport(CategoryReportRequest $request): JsonResponse
-    {
+    public function GenerateCategoryReport(CategoryReportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Category Report';
@@ -365,15 +367,16 @@ class ExportPdfData
             $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
 
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/cat_*.png');
-            return response()->json(['message' => 'Category report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/pdf'
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $e) {
             Log::error("Exception in CategoryReport (Blade): " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString());
-            return response()->json(['error' => 'Error generating category report.', 'details' => $e->getMessage()], 500);
+            abort(500, 'PDF Error: ' . $e->getMessage());
         }
     }
 
-    public function GenerateTagReport(TagReportRequest $request): JsonResponse
-    {
+    public function GenerateTagReport(TagReportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Tag Report';
@@ -400,15 +403,16 @@ class ExportPdfData
             $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
 
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/tag_*.png');
-            return response()->json(['message' => 'Tag report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/pdf'
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $e) {
             Log::error("Exception in GenerateTagReport (Blade): " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString());
-            return response()->json(['error' => 'Error generating tag report.', 'details' => $e->getMessage()], 500);
+            abort(500, 'PDF Error: ' . $e->getMessage());
         }
     }
 
-    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): JsonResponse
-    {
+    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Expense and Revenue Report';
@@ -436,14 +440,12 @@ class ExportPdfData
 
             $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/exprev_*.png');
 
-            return response()->json([
-                'message' => 'Expense/Revenue report generated successfully.',
-                'filename' => $filename,
-                'path' => $filePath
-            ], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/pdf'
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $e) {
             Log::error("Exception in GenerateExpenseRevenueReport (Blade): " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString());
-            return response()->json(['error' => 'Error generating expense/revenue report.', 'details' => $e->getMessage()], 500);
+            abort(500, 'PDF Error: ' . $e->getMessage());
         }
     }
 }
