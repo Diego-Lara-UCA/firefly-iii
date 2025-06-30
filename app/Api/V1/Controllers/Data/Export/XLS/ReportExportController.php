@@ -12,6 +12,7 @@ use FireflyIII\Api\V1\Requests\Data\Export\ExpenseRevenueReportRequest;
 use FireflyIII\Exceptions\FireflyException;
 use FireflyIII\Support\Export\ExportXlsData;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class ReportExportController extends Controller
 {
@@ -34,7 +35,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function DefaultReport(DefaultReportExportRequest $request): BinaryFileResponse
+    public function DefaultReport(DefaultReportExportRequest $request): Response
     {
         return $this->exporter->GenerateDefaultReport($request);
     }
@@ -44,7 +45,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function TransactionHistoryReport(TransactionHistoryExportRequest $request): BinaryFileResponse
+    public function TransactionHistoryReport(TransactionHistoryExportRequest $request): Response
     {
         return $this->exporter->GenerateTransactionReport($request);
     }
@@ -54,7 +55,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function BudgetReport(BudgetExportRequest $request): BinaryFileResponse 
+    public function BudgetReport(BudgetExportRequest $request): Response 
     {
         return $this->exporter->GenerateBudgetReport($request);
     }
@@ -64,7 +65,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function CategoryReport(CategoryReportRequest $request): BinaryFileResponse 
+    public function CategoryReport(CategoryReportRequest $request): Response 
     {
         return $this->exporter->GenerateCategoryReport($request);
     }
@@ -74,7 +75,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function TagReport(TagReportRequest $request): BinaryFileResponse 
+    public function TagReport(TagReportRequest $request): Response 
     {
         return $this->exporter->GenerateTagReport($request);
     }
@@ -84,7 +85,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function ExpenseRevenueReport(ExpenseRevenueReportRequest $request): BinaryFileResponse 
+    public function ExpenseRevenueReport(ExpenseRevenueReportRequest $request): Response 
     {
         return $this->exporter->GenerateExpenseRevenueReport($request);
     }
