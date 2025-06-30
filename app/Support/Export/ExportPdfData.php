@@ -17,6 +17,7 @@ use FireflyIII\Api\V1\Requests\Data\Export\CategoryReportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\TagReportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\ExpenseRevenueReportRequest;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 if (!defined('CHART_TEMP_DIR_CPCHART')) {
     $chartTempBasePath = function_exists('storage_path') ? storage_path('app' . DIRECTORY_SEPARATOR . 'temp_charts_cpchart') : rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'temp_charts_cpchart';
@@ -66,6 +67,14 @@ class ExportPdfData
             return;
         }
         $this->pChartPrerequisitesMet = true;
+    }
+    private function outputPdfFile(string $pdfContent, string $filename): Response
+    {
+        return response($pdfContent, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Cache-Control' => 'max-age=0',
+        ]);
     }
 
     private function getFontPath(string $fontName = "DejaVuSans.ttf"): string
@@ -177,7 +186,7 @@ class ExportPdfData
         }, $data);
     }
 
-    public function GenerateDefaultReport(DefaultReportExportRequest $request): BinaryFileResponse {
+    public function GenerateDefaultReport(DefaultReportExportRequest $request): Response {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Default Financial Report';
@@ -218,25 +227,16 @@ class ExportPdfData
             $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
             $mpdf->WriteHTML($html);
 
-            $filename = 'default_report_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
-            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
-
-            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/def_*.png');
-
-            return response()->download($filePath, $filename, [
-                'Content-Type' => 'application/pdf'
-            ])->deleteFileAfterSend(true);
-
+            $pdfContent = $mpdf->Output('', 'S'); // 'S' para obtener el PDF como string
+            $filename = 'default_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            return $this->outputPdfFile($pdfContent, $filename);
         } catch (\Throwable $e) {
-            Log::error("PDF DefaultReport (HTML Template): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
-            abort(500, 'PDF Error: ' . $e->getMessage());
+            Log::error("Exception in GenerateDefaultReport (PDF): " . $e->getMessage());
+            abort(500, 'Error generando el archivo PDF.');
         }
     }
 
-    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): BinaryFileResponse {
+    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): Response {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Transaction History Report';
@@ -292,23 +292,16 @@ class ExportPdfData
             $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
             $mpdf->WriteHTML($html);
 
-            $filename = 'transaction_history_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
-            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
-
-            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/trans_*.png');
-            return response()->download($filePath, $filename, [
-                'Content-Type' => 'application/pdf'
-            ])->deleteFileAfterSend(true);
+            $pdfContent = $mpdf->Output('', 'S');
+            $filename = 'transaction_history_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            return $this->outputPdfFile($pdfContent, $filename);
         } catch (\Throwable $e) {
-            Log::error("PDF TransactionReport (Blade): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
-            abort(500, 'PDF Error: ' . $e->getMessage());
+            Log::error("Exception in GenerateTransactionReport (PDF): " . $e->getMessage());
+            abort(500, 'Error generando el archivo PDF.');
         }
     }
 
-    public function GenerateBudgetReport(BudgetExportRequest $request): BinaryFileResponse {
+    public function GenerateBudgetReport(BudgetExportRequest $request): Response {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Budget Report';
@@ -324,23 +317,16 @@ class ExportPdfData
             $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
             $mpdf->WriteHTML($html);
 
-            $filename = 'budget_report_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
-            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
-
-            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/budget_*.png');
-            return response()->download($filePath, $filename, [
-                'Content-Type' => 'application/pdf'
-            ])->deleteFileAfterSend(true);
+            $pdfContent = $mpdf->Output('', 'S');
+            $filename = 'budget_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            return $this->outputPdfFile($pdfContent, $filename);
         } catch (\Throwable $e) {
-            Log::error("PDF BudgetReport (Blade): ".$e->getMessage()."\nTrace: ".$e->getTraceAsString());
-            abort(500, 'PDF Error: ' . $e->getMessage());
+            Log::error("Exception in GenerateBudgetReport (PDF): " . $e->getMessage());
+            abort(500, 'Error generando el archivo PDF.');
         }
     }
 
-    public function GenerateCategoryReport(CategoryReportRequest $request): BinaryFileResponse {
+    public function GenerateCategoryReport(CategoryReportRequest $request): Response {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Category Report';
@@ -360,23 +346,16 @@ class ExportPdfData
             $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
             $mpdf->WriteHTML($html);
 
-            $filename = 'category_report_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
-            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
-
-            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/cat_*.png');
-            return response()->download($filePath, $filename, [
-                'Content-Type' => 'application/pdf'
-            ])->deleteFileAfterSend(true);
+            $pdfContent = $mpdf->Output('', 'S');
+            $filename = 'category_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            return $this->outputPdfFile($pdfContent, $filename);
         } catch (\Throwable $e) {
-            Log::error("Exception in CategoryReport (Blade): " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString());
-            abort(500, 'PDF Error: ' . $e->getMessage());
+            Log::error("Exception in GenerateCategoryReport (PDF): " . $e->getMessage());
+            abort(500, 'Error generando el archivo PDF.');
         }
     }
 
-    public function GenerateTagReport(TagReportRequest $request): BinaryFileResponse {
+    public function GenerateTagReport(TagReportRequest $request): Response {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Tag Report';
@@ -396,23 +375,16 @@ class ExportPdfData
             $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
             $mpdf->WriteHTML($html);
 
-            $filename = 'tag_report_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
-            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
-
-            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/tag_*.png');
-            return response()->download($filePath, $filename, [
-                'Content-Type' => 'application/pdf'
-            ])->deleteFileAfterSend(true);
+            $pdfContent = $mpdf->Output('', 'S');
+            $filename = 'tag_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            return $this->outputPdfFile($pdfContent, $filename);
         } catch (\Throwable $e) {
-            Log::error("Exception in GenerateTagReport (Blade): " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString());
-            abort(500, 'PDF Error: ' . $e->getMessage());
+            Log::error("Exception in GenerateTagReport (PDF): " . $e->getMessage());
+            abort(500, 'Error generando el archivo PDF.');
         }
     }
 
-    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): BinaryFileResponse {
+    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): Response {
         try {
             $validatedData = $request->validated();
             $reportTitle = 'Expense and Revenue Report';
@@ -432,20 +404,12 @@ class ExportPdfData
             $mpdf = new \Mpdf\Mpdf(['tempDir' => storage_path('app/temp_mpdf')]);
             $mpdf->WriteHTML($html);
 
-            $filename = 'expense_revenue_report_'.Carbon::now()->format('Ymd_His').'.pdf';
-            $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) @mkdir($storageDir, 0775, true);
-            $filePath = $storageDir . DIRECTORY_SEPARATOR . $filename;
-            $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
-
-            $this->cleanupChartImages(CHART_TEMP_DIR_CPCHART . '/exprev_*.png');
-
-            return response()->download($filePath, $filename, [
-                'Content-Type' => 'application/pdf'
-            ])->deleteFileAfterSend(true);
+            $pdfContent = $mpdf->Output('', 'S');
+            $filename = 'expense_revenue_report_' . Carbon::now()->format('Ymd_His') . '.pdf';
+            return $this->outputPdfFile($pdfContent, $filename);
         } catch (\Throwable $e) {
-            Log::error("Exception in GenerateExpenseRevenueReport (Blade): " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString());
-            abort(500, 'PDF Error: ' . $e->getMessage());
+            Log::error("Exception in GenerateExpenseRevenueReport (PDF): " . $e->getMessage());
+            abort(500, 'Error generando el archivo PDF.');
         }
     }
 }
