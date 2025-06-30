@@ -11,7 +11,7 @@ use FireflyIII\Api\V1\Requests\Data\Export\TagReportRequest;
 use FireflyIII\Api\V1\Requests\Data\Export\ExpenseRevenueReportRequest;
 use FireflyIII\Exceptions\FireflyException;
 use FireflyIII\Support\Export\ExportPdfData;
-use Illuminate\Http\JsonResponse;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ReportExportController extends Controller
 {
@@ -34,7 +34,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function DefaultReport(DefaultReportExportRequest $request): JsonResponse
+    public function DefaultReport(DefaultReportExportRequest $request): BinaryFileResponse
     {
         return $this->exporter->GenerateDefaultReport($request);
     }
@@ -44,7 +44,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function TransactionHistoryReport(TransactionHistoryExportRequest $request): JsonResponse
+    public function TransactionHistoryReport(TransactionHistoryExportRequest $request): BinaryFileResponse
     {
         return $this->exporter->GenerateTransactionReport($request);
     }
@@ -54,7 +54,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function BudgetReport(BudgetExportRequest $request): JsonResponse 
+    public function BudgetReport(BudgetExportRequest $request): BinaryFileResponse 
     {
         return $this->exporter->GenerateBudgetReport($request);
     }
@@ -64,7 +64,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function CategoryReport(CategoryReportRequest $request): JsonResponse 
+    public function CategoryReport(CategoryReportRequest $request): BinaryFileResponse 
     {
         return $this->exporter->GenerateCategoryReport($request);
     }
@@ -74,7 +74,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function TagReport(TagReportRequest $request): JsonResponse 
+    public function TagReport(TagReportRequest $request): BinaryFileResponse 
     {
         return $this->exporter->GenerateTagReport($request);
     }
@@ -84,7 +84,7 @@ class ReportExportController extends Controller
      *
      * @throws FireflyException
      */
-    public function ExpenseRevenueReport(ExpenseRevenueReportRequest $request): JsonResponse 
+    public function ExpenseRevenueReport(ExpenseRevenueReportRequest $request): BinaryFileResponse 
     {
         return $this->exporter->GenerateExpenseRevenueReport($request);
     }

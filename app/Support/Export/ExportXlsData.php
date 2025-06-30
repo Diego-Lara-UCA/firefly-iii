@@ -25,7 +25,7 @@ use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Http\JsonResponse;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -345,7 +345,7 @@ class ExportXlsData {
      * @throws FireflyException
     */
 
-    public function GenerateDefaultReport (DefaultReportExportRequest $request): JsonResponse {
+    public function GenerateDefaultReport (DefaultReportExportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
             $spreadsheet = new Spreadsheet();
@@ -407,25 +407,27 @@ class ExportXlsData {
             // File saving
             $writer = new Xlsx($spreadsheet);
             $writer->setIncludeCharts(true);
-            
+
             $filename = 'default_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
             $storageDir = storage_path('app/reports');
             if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
             $filePath = $storageDir . '/' . $filename;
             $writer->save($filePath);
 
-            return response()->json(['message' => 'File saved. Added setIncludeCharts(true).', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ])->deleteFileAfterSend(true);
 
         } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
             Log::error("PhpSpreadsheet Exception: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
-            return response()->json(['error' => 'Error generando el archivo Excel (PhpSpreadsheet).', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            abort(500, 'Error generando el archivo Excel (PhpSpreadsheet).');
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
             $errorTrace = $e->getTraceAsString();
             $errorFile = $e->getFile();
             $errorLine = $e->getLine();
             Log::error("Generic Exception in XLS Export: {$errorMessage}\nTrace: {$errorTrace}\nFile: {$errorFile} Line: {$errorLine}");
-            return response()->json(['error' => 'Error generando el archivo Excel.', 'details' => $errorMessage, 'file' => $errorFile, 'line' => $errorLine], 500);
+            abort(500, 'Error generando el archivo Excel.');
         }
     }
 
@@ -435,7 +437,7 @@ class ExportXlsData {
      * @throws FireflyException
      */
     
-    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): JsonResponse {
+    public function GenerateTransactionReport(TransactionHistoryExportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
 
@@ -539,32 +541,28 @@ class ExportXlsData {
 
             // File saving
             $writer = new Xlsx($spreadsheet);
-            $writer->setIncludeCharts(true); // Importante para asegurar que los gráficos se guarden
-            
+            $writer->setIncludeCharts(true);
+
             $filename = 'transaction_history_' . Carbon::now()->format('Ymd_His') . '.xlsx';
-            $storageDir = storage_path('app/reports'); // Guardar en storage/app/reports
-            if (!is_dir($storageDir)) {
-                mkdir($storageDir, 0755, true);
-            }
+            $storageDir = storage_path('app/reports');
+            if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
             $filePath = $storageDir . '/' . $filename;
             $writer->save($filePath);
 
-            return response()->json([
-                'message' => 'Transaction history report generated and saved successfully.',
-                'filename' => $filename,
-                'path' => $filePath
-            ], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ])->deleteFileAfterSend(true);
 
         } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
             Log::error("PhpSpreadsheet Exception in TransactionHistoryReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
-            return response()->json(['error' => 'Error generating transaction history (PhpSpreadsheet).', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            abort(500, 'Error generating transaction history (PhpSpreadsheet).');
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
             $errorTrace = $e->getTraceAsString();
             $errorFile = $e->getFile();
             $errorLine = $e->getLine();
             Log::error("Generic Exception in TransactionHistoryReport: {$errorMessage}\nTrace: {$errorTrace}\nFile: {$errorFile} Line: {$errorLine}");
-            return response()->json(['error' => 'Error generating transaction history.', 'details' => $errorMessage, 'file' => $errorFile, 'line' => $errorLine], 500);
+            abort(500, 'Error generating transaction history.');
         }
     }
 
@@ -574,7 +572,7 @@ class ExportXlsData {
      * @throws FireflyException
      */
     
-    public function GenerateBudgetReport(BudgetExportRequest $request): JsonResponse {
+    public function GenerateBudgetReport(BudgetExportRequest $request): BinaryFileResponse {
         try {
             $validatedData = $request->validated();
 
@@ -740,35 +738,31 @@ class ExportXlsData {
 
             $writer = new Xlsx($spreadsheet);
             $writer->setIncludeCharts(true);
-            
+
             $filename = 'budget_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
             $storageDir = storage_path('app/reports');
-            if (!is_dir($storageDir)) {
-                mkdir($storageDir, 0755, true);
-            }
+            if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
             $filePath = $storageDir . '/' . $filename;
             $writer->save($filePath);
 
-            return response()->json([
-                'message' => 'Budget report generated and saved successfully.',
-                'filename' => $filename,
-                'path' => $filePath
-            ], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ])->deleteFileAfterSend(true);
 
         } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
             Log::error("PhpSpreadsheet Exception in BudgetReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
-            return response()->json(['error' => 'Error generating budget report (PhpSpreadsheet).', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            abort(500, 'Error generating budget report (PhpSpreadsheet).');
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
             $errorTrace = $e->getTraceAsString();
             $errorFile = $e->getFile();
             $errorLine = $e->getLine();
             Log::error("Generic Exception in BudgetReport: {$errorMessage}\nTrace: {$errorTrace}\nFile: {$errorFile} Line: {$errorLine}");
-            return response()->json(['error' => 'Error generating budget report.', 'details' => $errorMessage, 'file' => $errorFile, 'line' => $errorLine], 500);
+            abort(500, 'Error generating budget report.');
         }
     }
 
-    public function GenerateCategoryReport(CategoryReportRequest $request): JsonResponse
+    public function GenerateCategoryReport(CategoryReportRequest $request): BinaryFileResponse
     {
         try {
             $validatedData = $request->validated();
@@ -900,15 +894,17 @@ class ExportXlsData {
             $filePath = $storageDir . '/' . $filename;
             $writer->save($filePath);
 
-            return response()->json(['message' => 'Category report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ])->deleteFileAfterSend(true);
 
         } catch (\Exception $e) {
             Log::error("Exception in CategoryReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
-            return response()->json(['error' => 'Error generating category report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            abort(500, 'Error generating category report.');
         }
     }
 
-    public function GenerateTagReport(TagReportRequest $request): JsonResponse
+    public function GenerateTagReport(TagReportRequest $request): BinaryFileResponse
     {
         try {
             $validatedData = $request->validated();
@@ -1021,15 +1017,17 @@ class ExportXlsData {
             $filePath = $storageDir . '/' . $filename;
             $writer->save($filePath);
 
-            return response()->json(['message' => 'Tag report generated successfully.', 'filename' => $filename, 'path' => $filePath], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ])->deleteFileAfterSend(true);
 
         } catch (\Exception $e) {
             Log::error("Exception in GenerateTagReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
-            return response()->json(['error' => 'Error generating tag report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            abort(500, 'Error generating tag report.');
         }
     }
 
-    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): JsonResponse
+    public function GenerateExpenseRevenueReport(ExpenseRevenueReportRequest $request): BinaryFileResponse
     {
         try {
             $validatedData = $request->validated();
@@ -1140,23 +1138,19 @@ class ExportXlsData {
             $writer = new Xlsx($spreadsheet);
             $writer->setIncludeCharts(true);
 
-            // ***** CAMBIO EN EL NOMBRE DEL ARCHIVO *****
             $filename = 'expense_revenue_report_' . Carbon::now()->format('Ymd_His') . '.xlsx';
-            
             $storageDir = storage_path('app/reports');
             if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
             $filePath = $storageDir . '/' . $filename;
             $writer->save($filePath);
 
-            return response()->json([
-                'message' => 'Expense/Revenue report generated successfully.',
-                'filename' => $filename,
-                'path' => $filePath
-            ], 200);
+            return response()->download($filePath, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ])->deleteFileAfterSend(true);
 
         } catch (\Exception $e) {
             Log::error("Exception in GenerateExpenseRevenueReport: " . $e->getMessage() . "\nTrace: " . $e->getTraceAsString() . "\nFile: " . $e->getFile() . " Line: " . $e->getLine());
-            return response()->json(['error' => 'Error generating expense/revenue report.', 'details' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            abort(500, 'Error generating expense/revenue report.');
         }
     }
 }
