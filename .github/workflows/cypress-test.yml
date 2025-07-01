@@ -26,15 +26,13 @@ jobs:
         with:
           php-version: '8.4'
 
-      # 3. Prepara el entorno de Laravel ANTES de instalar dependencias
-      - name: Prepare Laravel Environment
-        run: |
-          cp .env.example .env
-          php artisan key:generate
-
-      # 4. Instala dependencias de Composer (Ahora con el .env listo)
+      # 3. Instala dependencias de Composer PRIMERO
       - name: Install Composer dependencies
         run: composer install --no-interaction --no-progress
+
+      # 4. Prepara el entorno de Firefly III usando su propio comando
+      - name: Prepare Firefly III Environment
+        run: php artisan firefly-iii:install --no-interaction
 
       # 5. Configura Node.js
       - name: Set up Node.js
