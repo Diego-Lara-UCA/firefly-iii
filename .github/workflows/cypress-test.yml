@@ -36,7 +36,7 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
-      # 5. Configura la base de datos (importante para las pruebas)
+      # 5. Configura la base de datos
       - name: Setup Database
         run: |
           touch database/database.sqlite
@@ -68,4 +68,9 @@ jobs:
       # 10. Guarda los artefactos
       - name: Upload artifacts
         if: always()
-        uses:
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-artifacts
+          path: |
+            cypress/screenshots
+            cypress/videos
