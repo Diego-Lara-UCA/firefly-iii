@@ -16,7 +16,7 @@ jobs:
 
     # Los pasos que componen el job
     steps:
-      # 1. Descarga el código de tu repositorio
+      # 1. Descarga el código
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -26,22 +26,30 @@ jobs:
         with:
           php-version: '8.4'
 
-      # 3. Instala dependencias de Composer SIN ejecutar scripts automáticos
+      # 3. Instala dependencias de Composer SIN scripts
       - name: Install Composer dependencies
         run: composer install --no-scripts --no-interaction --no-progress
 
-      # 4. Prepara el entorno de Firefly III (ahora que el código existe)
-      - name: Prepare Firefly III Environment
-        run: php artisan firefly-iii:install --no-interaction
+      # 4. Prepara el entorno de Laravel
+      - name: Prepare Laravel Environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
 
-      # 5. Configura Node.js
+      # 5. Configura la base de datos (importante para las pruebas)
+      - name: Setup Database
+        run: |
+          touch database/database.sqlite
+          php artisan migrate --seed --force
+
+      # 6. Configura Node.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 6. Cachea las dependencias para acelerar ejecuciones futuras
-      - name: Cache dependencies
+      # 7. Cachea dependencias de Node
+      - name: Cache Node dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -49,20 +57,15 @@ jobs:
             ~/.cache/Cypress
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
 
-      # 7. Instala dependencias de Node
+      # 8. Instala dependencias de Node
       - name: Install Node dependencies
         run: npm ci
 
-      # 8. Inicia el servidor y ejecuta las pruebas de Cypress
+      # 9. Inicia el servidor y ejecuta las pruebas
       - name: Run Cypress tests
         run: npm run test:e2e
 
-      # 9. Guarda las capturas de pantalla y videos (siempre)
+      # 10. Guarda los artefactos
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cypress-artifacts
-          path: |
-            cypress/screenshots
-            cypress/videos
+        uses:
