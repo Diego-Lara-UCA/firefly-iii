@@ -20,13 +20,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Configura Node.js
+      # 2. Configura PHP
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2' # Ajusta la versión de PHP si es necesario
+
+      # 3. Instala dependencias de Composer
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress
+
+      # 4. Prepara el entorno de Laravel
+      - name: Prepare Laravel Environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # 5. Configura Node.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. Cachea las dependencias de npm y Cypress para acelerar ejecuciones futuras
+      # 6. Cachea las dependencias para acelerar ejecuciones futuras
       - name: Cache dependencies
         uses: actions/cache@v4
         with:
@@ -34,21 +50,19 @@ jobs:
             ~/.npm
             ~/.cache/Cypress
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
 
-      # 4. Instala las dependencias del proyecto de forma limpia
-      - name: Install dependencies
+      # 7. Instala dependencias de Node
+      - name: Install Node dependencies
         run: npm ci
 
-      # 5. Ejecuta las pruebas de Cypress
+      # 8. Inicia el servidor y ejecuta las pruebas de Cypress
       - name: Run Cypress tests
-        run: npx cypress run
+        run: npm run test:e2e
 
-      # 6. Guarda las capturas de pantalla y videos (siempre)
+      # 9. Guarda las capturas de pantalla y videos (siempre)
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
-        if: always() # <-- Cambio clave aquí
         with:
           name: cypress-artifacts
           path: |
