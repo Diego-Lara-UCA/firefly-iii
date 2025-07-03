@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  firefly-iii:
+    image: tu-registry.com/firefly-iii:latest
+    container_name: firefly_iii_prod
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - firefly_upload:/var/www/html/storage/upload
+      - firefly_export:/var/www/html/storage/export
+    depends_on:
+      - db
+    networks:
+      - firefly_net
+
+  db:
+    image: postgres:15
+    container_name: firefly_db_prod
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USERNAME}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_DATABASE}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    networks:
+      - firefly_net
+
+volumes:
+  pgdata_prod:
+  firefly_upload:
+  firefly_export:
+
+networks:
+  firefly_net:
+    driver: bridge

@@ -1,0 +1,17 @@
+FROM fireflyiii/core:latest
+
+# Copiar tus archivos modificados
+COPY resources/views/reports/ /var/www/html/resources/views/reports/
+
+# Establecer permisos
+RUN chown -R www-data:www-data /var/www/html/resources/views/
+RUN chown -R www-data:www-data /var/www/html/storage/
+
+# Render usa puerto dinámico
+EXPOSE $PORT
+
+# Script de inicio para Render
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+CMD ["/start.sh"]
