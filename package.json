@@ -1,12 +1,17 @@
 {
     "scripts": {
-        "postinstall": "patch-package --error-on-fail"
+        "postinstall": "patch-package --error-on-fail",
+        "start": "php artisan serve",
+        "cy:run": "npx cypress run",
+        "test:e2e": "start-server-and-test start http://127.0.0.1:8000 cy:run"
     },
     "workspaces": [
         "resources/assets/v1",
         "resources/assets/v2"
     ],
     "devDependencies": {
-        "postcss": "^8.4.47"
+        "cypress": "^14.5.0",
+        "postcss": "^8.4.47",
+        "start-server-and-test": "^2.0.12"
     }
 }

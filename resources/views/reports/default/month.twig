@@ -5,7 +5,11 @@
 {% endblock %}
 
 {% block content %}
-
+   <div class="row">
+        <div class="col-lg-12 col-md-12 col-sm-12">
+            {% include 'reports.partials.export_button' %}
+        </div>
+    </div>
     {# chart #}
     <div class="row">
         <div class="col-lg-12 col-md-12 col-sm-12">
@@ -123,7 +127,6 @@
                     <span class="fa fa-refresh fa-spin"></span>
                 </div>
             </div>
-
         </div>
     </div>
     <div class="row">
@@ -168,11 +171,504 @@
         var expenseReportUrl = '{{ route('report-data.operations.expenses', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
         var incExpReportUrl = '{{ route('report-data.operations.operations', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
         var billReportUrl = '{{ route('report-data.bills.overview', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
-
         var accountChartUrl = '{{ route('chart.account.report', [accountIds, start.format('Ymd'), end.format('Ymd')]) }}';
+
+        // URL para el endpoint de exportación XLS (generación del archivo)
+        var exportXlsDefaultReportUrl = '{{ route('api.v1.data.export.xls.default-report') }}';
+        // URL para el endpoint de exportación PDF (generación del archivo)
+        var exportPdfDefaultReportUrl = '{{ route('api.v1.data.export.pdf.default-report') }}';
+        // No necesitamos la URL de descarga si no vamos a descargar
 
     </script>
     <script type="text/javascript" src="v1/js/ff/reports/all.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
     <script type="text/javascript" src="v1/js/ff/reports/default/all.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
     <script type="text/javascript" src="v1/js/ff/reports/default/month.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
+
+    <script type="text/javascript" nonce="{{ JS_NONCE }}">
+        var exportInProgress = false;
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            const bgColor = type === 'success' ? '#28a745' : '#dc3545'; // Green for success, Red for error
+
+            Object.assign(toast.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '15px 20px',
+                backgroundColor: bgColor,
+                color: 'white',
+                borderRadius: '5px',
+                zIndex: '1050',
+                opacity: '0',
+                transform: 'translateY(-20px)',
+                transition: 'opacity 0.3s, transform 0.3s',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+            });
+
+            document.body.appendChild(toast);
+
+            // Fade and slide in
+            setTimeout(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateY(0)';
+            }, 100);
+
+            // Fade and slide out
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 4000);
+        }
+
+        function normalizeCurrencyString(originalCellText) {
+            if (typeof originalCellText !== 'string' || originalCellText.trim() === "") {
+                return originalCellText;
+            }
+
+            let cleanedText = originalCellText.replace(/[€$]/g, '').trim(); // Quitar símbolos de moneda comunes y espacios
+
+            const hasDot = cleanedText.includes('.');
+            const hasComma = cleanedText.includes(',');
+
+            if (hasDot && hasComma) {
+                if (cleanedText.lastIndexOf(',') > cleanedText.lastIndexOf('.')) {
+                    // Formato: 1.234,56 (coma es decimal)
+                    cleanedText = cleanedText.replace(/\./g, ''); // Quitar puntos (miles)
+                    cleanedText = cleanedText.replace(/,/g, '.'); // Coma a punto (decimal)
+                } else {
+                    // Formato: 1,234.56 (punto es decimal)
+                    cleanedText = cleanedText.replace(/,/g, ''); // Quitar comas (miles)
+                }
+            } else if (hasComma) {
+                // Solo comas, no puntos. Ej: "1234,56" o "1,234"
+                // Heurística: si una coma es seguida por 1 o 2 dígitos al final, es decimal. Sino, separador de miles.
+                if (/,(\d{1,2})$/.test(cleanedText) && (cleanedText.match(/,/g) || []).length === 1) {
+                    cleanedText = cleanedText.replace(/,/g, '.'); // Coma a punto (decimal)
+                } else {
+                    cleanedText = cleanedText.replace(/,/g, ''); // Quitar comas (miles)
+                }
+            } else if (hasDot) {
+                // Solo puntos, no comas. Ej: "123.45" o "1.234.567"
+                const dotCount = (cleanedText.match(/\./g) || []).length;
+                if (dotCount > 1) {
+                    // Múltiples puntos, asumimos separadores de miles (ej: "200.000" -> "200000")
+                    cleanedText = cleanedText.replace(/\./g, '');
+                }
+                // Si solo hay un punto (ej: "123.45"), parseFloat lo maneja bien.
+            }
+
+            const numericValue = parseFloat(cleanedText);
+            return isNaN(numericValue) ? originalCellText : numericValue;
+        }
+
+        /**
+         * Normaliza una cadena que representa un valor de porcentaje a un número.
+         * @param {string} originalCellText El texto de la celda.
+         * @returns {number|string} El valor numérico o el texto original si no se puede convertir.
+         */
+        function normalizePercentageString(originalCellText) {
+            if (typeof originalCellText !== 'string' || originalCellText.trim() === "") {
+                return originalCellText;
+            }
+            let cleanedText = originalCellText.replace(/%/g, '').trim(); // Quitar símbolo de porcentaje
+            if (cleanedText.includes(',')) { // Asumir coma como decimal para porcentajes
+                cleanedText = cleanedText.replace(/,/g, '.');
+            }
+            const numericValue = parseFloat(cleanedText);
+            return isNaN(numericValue) ? originalCellText : numericValue;
+        }
+        
+        function parseHtmlTable(tableContainerId) {
+            const data = [];
+            const $table = $(`#${tableContainerId}`).find('table');
+            if ($table.length === 0) {
+                console.warn(`[${tableContainerId}] No se encontró la tabla.`);
+                return data;
+            }
+
+            const headerRow = [];
+            $table.find('thead tr th').each(function() {
+                headerRow.push($(this).text().trim());
+            });
+
+            // MODIFICACIÓN: No añadir la cabecera desde el frontend si el backend ya las maneja.
+            // if (headerRow.length > 0) {
+            //     if (tableContainerId === 'budgetReport' && headerRow.length === 9 && headerRow[6] === "") {
+            //         // console.log(`[${tableContainerId}] Cabecera original:`, JSON.stringify(headerRow));
+            //         headerRow.splice(6, 1); 
+            //         // console.log(`[${tableContainerId}] Cabecera modificada:`, JSON.stringify(headerRow));
+            //     }
+            //     data.push(headerRow); // Comentado o eliminado para no enviar cabeceras desde el frontend
+            // } else {
+            //     console.warn(`[${tableContainerId}] No se pudo determinar la cabecera de la tabla.`);
+            // }
+
+            // Procesar tbody y tfoot
+            $table.find('tbody tr, tfoot tr').each(function(rowIndex) {
+                const currentRow = $(this);
+                const row = [];
+                const isInTfoot = currentRow.closest('tfoot').length > 0;
+
+                // if (tableContainerId === 'budgetReport') {
+                //     console.log(`[budgetReport ${isInTfoot ? 'tfoot' : 'tbody'}] HTML de la fila ${rowIndex}:`, currentRow.html());
+                //     console.log(`[budgetReport ${isInTfoot ? 'tfoot' : 'tbody'}] Celdas encontradas en fila ${rowIndex}:`, currentRow.find('td').length);
+                // }
+
+                currentRow.find('td').each(function(cellIndex) {
+                    let cellText = $(this).text().trim();
+
+                    if (tableContainerId === 'accountReport' && cellIndex === 0) {
+                        row.push(cellText); 
+                    } else if (tableContainerId === 'budgetReport') {
+                        // Columnas de salida deseadas para XLS (8): Budget, Date, Budgeted, pct, Spent, pct, Left, Overspent
+
+                        if (isInTfoot) {
+                            // Mapeo para TFOOT de budgetReport
+                            // Asumimos que el HTML tiene 7 <td> elementos:
+                            // td[0] (colspan=2): Suma
+                            // td[1]: Budgeted
+                            // td[2]: pct. (budgeted) - vacío
+                            // td[3]: Spent
+                            // td[4]: pct. (spent) - vacío
+                            // td[5]: CELDA VACÍA INESPERADA
+                            // td[6]: Valor de 'Left'
+                            // El valor de 'Overspent' para el tfoot se asumirá como 0 si no hay td[7]
+
+                            if (cellIndex === 0) { // td[0] "Sum (Euro)" (colspan="2")
+                                row.push(cellText); // Columna 'Budget' para XLS
+                                row.push("");       // Columna 'Date' para XLS (vacía en tfoot)
+                            } else if (cellIndex === 1) { // td[1] 'Budgeted'
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 2) { // td[2] 'pct.' (budgeted)
+                                row.push(""); 
+                            } else if (cellIndex === 3) { // td[3] 'Spent'
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 4) { // td[4] 'pct.' (spent)
+                                row.push("");
+                            }
+                            // cellIndex === 5 es la celda HTML td[5] que sospechamos está vacía y no debe ir a 'Left'.
+                            // La omitimos para la asignación directa a 'Left'.
+                            // La omitimos para la asignación directa a 'Left'.
+                            else if (cellIndex === 6) { // Esta es la celda HTML td[6], que contiene el valor real de 'Left'.
+                                row.push(normalizeCurrencyString(cellText)); // Asignar a la columna 'Left' del XLS.
+                                // Como el HTML tfoot probablemente solo tiene 7 <td> (hasta td[6]),
+                                // y la cabecera del XLS espera 8 columnas,
+                                // necesitamos añadir un valor para 'Overspent'.
+                                // Si la imagen HTML correcta muestra "Overspent: 0,00 €" para el tfoot, usamos 0.
+                                row.push(normalizeCurrencyString("0,00 €")); // O simplemente row.push(0);
+                            }
+                            // Si hubiera una td[7] para Overspent, se manejaría aquí.
+                            // Como no esperamos una td[7] según la hipótesis, el bucle 'each' terminará después de cellIndex === 6.
+                        } else { // Lógica para TBODY (asumiendo que el tbody tiene 9 celdas por fila)
+                            if (cellIndex === 0) { // Budget
+                                row.push(cellText);
+                            } else if (cellIndex === 1) { // Date
+                                row.push(cellText);
+                            } else if (cellIndex === 2) { // Budgeted
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 3) { // pct. (Budgeted)
+                                row.push(normalizePercentageString(cellText));
+                            } else if (cellIndex === 4) { // Spent
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 5) { // pct. (Spent)
+                                row.push(normalizePercentageString(cellText));
+                            }
+                            // cellIndex === 6 es la celda vacía en tbody, se omite para el XLS.
+                            else if (cellIndex === 7) { // Left
+                                row.push(normalizeCurrencyString(cellText));
+                            } else if (cellIndex === 8) { // Overspent
+                                row.push(normalizeCurrencyString(cellText));
+                            }
+                        }
+                    } else {
+                        // Lógica general de parseo para otras tablas
+                        // Asumimos que son valores monetarios por defecto si no son casos especiales
+                        if (cellText.toLowerCase().includes('sum of sums')) { // Mantener texto especial
+                            row.push(cellText);
+                        } else {
+                            row.push(normalizeCurrencyString(cellText));
+                        }
+                    }
+                });
+
+                if (row.length > 0) {
+                    // const actualHeaderRowForComparison = data.length > 0 ? data[0] : []; // Ya no es necesario si no enviamos cabeceras
+                    // if (actualHeaderRowForComparison.length > 0 && row.length !== actualHeaderRowForComparison.length) {
+                        // console.warn(`[${tableContainerId}${isInTfoot ? ' tfoot' : ''}] Discrepancia en columnas para fila ${rowIndex}: Cabecera tiene ${actualHeaderRowForComparison.length}, Fila de datos tiene ${row.length}. Cabecera:`, actualHeaderRowForComparison, `Datos:`, row);
+                    // }
+                    // if (!(data.length === 1 && row.every(cell => cell === "" || cell === null || typeof cell === 'undefined'))) { // Esta lógica podría necesitar ajuste si la primera fila ahora es de datos
+                    data.push(row);
+                    // }
+                }
+            });
+            return data;
+        }
+
+        function handleExport(exportType, xlsUrl, pdfUrl, dataCollector, $button) {
+            if (exportInProgress) return;
+            exportInProgress = true;
+
+            var originalText = $button.html();
+            $button.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
+
+            setTimeout(() => {
+                try {
+                    var exportData = dataCollector();
+                    console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
+
+                    var exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
+                    var fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+                    var fileTypeExtension = exportType === 'xls' ? '.xlsx' : '.pdf';
+
+                    $.ajax({
+                        url: exportUrl,
+                        type: 'POST',
+                        data: JSON.stringify(exportData),
+                        contentType: 'application/json; charset=utf-8',
+                        headers: {
+                            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                        },
+                        processData: false,
+                        xhrFields: {
+                            responseType: 'blob'
+                        },
+                        success: function(data, status, xhr) {
+                            console.log('Respuesta recibida correctamente, Content-Type:', xhr.getResponseHeader('Content-Type'));
+                            const contentType = xhr.getResponseHeader('Content-Type');
+                            if (contentType && (contentType.includes('text/html') || contentType.includes('text/plain'))) {
+                                const reader = new FileReader();
+                                reader.onload = function() {
+                                    showToast(`Error inesperado. El servidor respondió con HTML en lugar de ${fileTypeMessage}. Revisa la consola.`, 'error');
+                                    console.error('Contenido de la respuesta HTML:', reader.result);
+                                };
+                                reader.readAsText(data);
+                                return;
+                            }
+                            const blob = new Blob([data], {type: contentType || 'application/' + exportType});
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            const contentDisposition = xhr.getResponseHeader('Content-Disposition');
+                            let fileName = 'reporte_' + moment().format('YYYYMMDD_HHmmss') + fileTypeExtension;
+                            if (contentDisposition) {
+                                const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                                if (fileNameMatch && fileNameMatch[1]) {
+                                    fileName = fileNameMatch[1].replace(/['"]/g, '');
+                                }
+                            }
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => {
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                            }, 100);
+                            showToast(`El informe ${fileTypeMessage} se está descargando.`, 'success');
+                        },
+                        error: function(xhr, status, error) {
+                            console.error('Error en la exportación:', error);
+                            showToast('Error al generar el informe.', 'error');
+                        },
+                        complete: function() {
+                            $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                            exportInProgress = false;
+                        }
+                    });
+                } catch (e) {
+                    console.error("Error durante la recolección de datos:", e);
+                    showToast("Error durante la recolección de datos. Revisa la consola.", 'error');
+                    $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                    exportInProgress = false;
+                }
+            }, 10);
+        }
+
+        function collectDefaultReportData() {
+            const exportData = {
+                chartDateLabels: [],
+                chartBalanceValues: [],
+                accountBalancesTableData: [],
+                incomeVsExpensesTableData: [],
+                revenueIncomeTableData: [],
+                expensesTableData: [],
+                budgetsTableData: [],
+                categoriesTableData: [],
+                budgetSplitAccountTableData: [],
+                subscriptionsTableData: []
+            };
+
+            if (typeof window.accountBalancesChart !== 'undefined' && window.accountBalancesChart.data) {
+                const chartInstance = window.accountBalancesChart;
+                const chartLabels = chartInstance.data.labels;
+                const datasets = chartInstance.data.datasets;
+
+                // --- INICIO DE LOGS Y LÓGICA MEJORADA PARA GRÁFICOS ---
+                console.log('[Chart Data Extraction] Intentando extraer datos del gráfico.');
+                console.log('[Chart Data Extraction] chartInstance.data.labels:', chartLabels);
+                
+                // Loguear información de TODOS los datasets
+                if (datasets && datasets.length > 0) {
+                    console.log(`[Chart Data Extraction] Número total de datasets: ${datasets.length}`);
+                    datasets.forEach((dataset, i) => {
+                        console.log(`[Chart Data Extraction] ---- Dataset Index: ${i} ----`);
+                        console.log(`[Chart Data Extraction] datasets[${i}].label:`, dataset.label);
+                        console.log(`[Chart Data Extraction] datasets[${i}].data (referencia directa):`, dataset.data);
+                        if (dataset.data && typeof dataset.data === 'object') {
+                            console.log(`[Chart Data Extraction] typeof datasets[${i}].data:`, typeof dataset.data);
+                            if (Array.isArray(dataset.data)) {
+                                console.log(`[Chart Data Extraction] datasets[${i}].data.length:`, dataset.data.length);
+                                console.log(`[Chart Data Extraction] datasets[${i}].data[0]:`, dataset.data[0]); // Primer elemento como ejemplo
+                            }
+                        }
+                        console.log(`[Chart Data Extraction] ---- Fin Dataset Index: ${i} ----`);
+                    });
+                } else {
+                    console.log('[Chart Data Extraction] No se encontraron datasets en el gráfico.');
+                }
+
+                if (chartLabels && chartLabels.length > 0) {
+                    chartLabels.forEach((label, index) => {
+                        const momentDate = moment(label, "MMMM Do, YYYY", "es");
+                        const formattedLabel = momentDate.isValid() ? momentDate.format("YYYY-MM-DD") : label;
+                        exportData.chartDateLabels.push([formattedLabel]);
+                    });
+
+                    // --- IMPORTANTE: Determinar qué dataset es el relevante ---
+                    // Por ahora, seguimos asumiendo datasets[0], pero esto podría necesitar cambiar
+                    // basado en los logs de arriba.
+                    const relevantDatasetIndex = 1; // CAMBIA ESTO si los datos están en otro índice
+                    // -------------------------------------------------------------
+
+                    const hasRelevantDataset = datasets && datasets.length > relevantDatasetIndex && datasets[relevantDatasetIndex];
+                    let hasRelevantDatasetData = false;
+
+                    if (hasRelevantDataset) {
+                        const currentDataset = datasets[relevantDatasetIndex];
+                        console.log(`[Chart Data Extraction] Procesando datos del dataset[${relevantDatasetIndex}] ('${currentDataset.label}')`);
+                        console.log(`[Chart Data Extraction] datasets[${relevantDatasetIndex}].data (raw para procesamiento):`, currentDataset.data);
+
+                        if (currentDataset.data && (typeof currentDataset.data === 'function' || currentDataset.data.length > 0)) {
+                            if (typeof currentDataset.data === 'function') {
+                                const dynamicData = currentDataset.data();
+                                hasRelevantDatasetData = dynamicData && dynamicData.length > 0;
+                            } else {
+                                hasRelevantDatasetData = currentDataset.data.length > 0;
+                            }
+                        }
+                    }
+
+                    console.log(`[Chart Data Extraction] hasRelevantDataset (índice ${relevantDatasetIndex}):`, hasRelevantDataset);
+                    console.log(`[Chart Data Extraction] hasRelevantDatasetData (índice ${relevantDatasetIndex}, final check):`, hasRelevantDatasetData);
+
+                    if (hasRelevantDatasetData) {
+                        const currentDataset = datasets[relevantDatasetIndex];
+                        if (currentDataset.label) {
+                            exportData.chartBalanceValues.push([currentDataset.label]);
+                        }
+                        
+                        const dataArray = typeof currentDataset.data === 'function' ? currentDataset.data() : currentDataset.data;
+
+                        dataArray.forEach(point => {
+                            let rawValue = point;
+                            if (typeof point === 'object' && point !== null && typeof point.y !== 'undefined') {
+                                rawValue = point.y;
+                            }
+                            const valueAsString = (rawValue === null || typeof rawValue === 'undefined') ? "" : String(rawValue);
+                            const normalizedValue = normalizeCurrencyString(valueAsString);
+                            let numericValue = parseFloat(normalizedValue);
+                            if (isNaN(numericValue)) {
+                                numericValue = 0; 
+                            }
+                            exportData.chartBalanceValues.push([numericValue]);
+                        });
+                    } else {
+                        console.warn('[Chart Data Extraction] No se encontraron datos válidos en datasets[0].data o datasets está vacío. Rellenando con ceros.');
+                        if (hasDatasets && datasets[0] && datasets[0].label) {
+                            exportData.chartBalanceValues.push([datasets[0].label]);
+                        }
+                        // Rellenar con ceros basado en el número de etiquetas
+                        const numLabels = exportData.chartDateLabels.length > 0 ? exportData.chartDateLabels.length : (chartLabels ? chartLabels.length : 1);
+                        for (let i = 0; i < numLabels; i++) {
+                            if (exportData.chartBalanceValues.length === 0 && i === 0 && !(hasDatasets && datasets[0] && datasets[0].label)) {
+                                // Si no hay etiqueta de dataset y es el primer valor, no añadir nada extra
+                            } else if (exportData.chartBalanceValues.length === 0 && i === 0 && (hasDatasets && datasets[0] && datasets[0].label)) {
+                                // La etiqueta ya se añadió, este es el primer valor de datos
+                                exportData.chartBalanceValues.push([0]);
+                            }
+                            else {
+                                exportData.chartBalanceValues.push([0]);
+                            }
+                        }
+                         // Asegurar que haya al menos una etiqueta y un valor si todo falla
+                        if (exportData.chartBalanceValues.length === 0) {
+                            exportData.chartBalanceValues.push(["No Label"]);
+                            exportData.chartBalanceValues.push([0]);
+                        } else if (exportData.chartBalanceValues.length === 1 && (hasDatasets && datasets[0] && datasets[0].label)) {
+                            // Solo se añadió la etiqueta, añadir un 0 para datos
+                             exportData.chartBalanceValues.push([0]);
+                        }
+                    }
+                } else {
+                    console.warn('[Chart Data Extraction] El gráfico no tiene etiquetas (chartLabels). Usando fechas de inicio/fin del informe para chartDateLabels y ceros para valores.');
+                    const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD");
+                    exportData.chartDateLabels.push([formattedStartDate]);
+                    exportData.chartBalanceValues.push(["Default Data"]); // Etiqueta por defecto
+                    exportData.chartBalanceValues.push([0]);
+
+                    if (startDate !== endDate) {
+                        const formattedEndDate = moment(endDate, "YYYYMMDD").format("YYYY-MM-DD");
+                        exportData.chartDateLabels.push([formattedEndDate]);
+                        exportData.chartBalanceValues.push([0]); // Un valor cero correspondiente a la etiqueta de fin
+                    }
+                }
+                // --- FIN DE LOGS Y LÓGICA MEJORADA PARA GRÁFICOS ---
+
+            } else {
+                console.warn('[Chart Data Extraction] window.accountBalancesChart no está definido o no tiene .data. Usando fallback para chartDateLabels y chartBalanceValues.');
+                const formattedStartDate = moment(startDate, "YYYYMMDD").format("YYYY-MM-DD");
+                exportData.chartDateLabels.push([formattedStartDate]);
+                exportData.chartBalanceValues.push(["Default Data"]);
+                exportData.chartBalanceValues.push([0]);
+
+                if (startDate !== endDate) {
+                    const formattedEndDate = moment(endDate, "YYYYMMDD").format("YYYY-MM-DD");
+                    exportData.chartDateLabels.push([formattedEndDate]);
+                    exportData.chartBalanceValues.push([0]);
+                }
+            }
+
+            exportData.accountBalancesTableData = parseHtmlTable('accountReport');
+            exportData.incomeVsExpensesTableData = parseHtmlTable('incomeVsExpenseReport');
+            exportData.revenueIncomeTableData = parseHtmlTable('incomeReport');
+            exportData.expensesTableData = parseHtmlTable('expenseReport');
+            exportData.budgetsTableData = parseHtmlTable('budgetReport');
+            exportData.categoriesTableData = parseHtmlTable('categoryReport');
+            exportData.budgetSplitAccountTableData = parseHtmlTable('balanceReport');
+            exportData.subscriptionsTableData = parseHtmlTable('billReport');
+
+            return exportData;
+        }
+
+        $(function() {
+            $(document).on('click', '#exportXlsLink', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Click export XLS');
+                handleExport('xls', exportXlsDefaultReportUrl, exportPdfDefaultReportUrl, collectDefaultReportData, $(this));
+            });
+            $(document).on('click', '#exportPdfLink', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Click export PDF');
+                handleExport('pdf', exportXlsDefaultReportUrl, exportPdfDefaultReportUrl, collectDefaultReportData, $(this));
+            });
+        });
+    </script>
 {% endblock %}

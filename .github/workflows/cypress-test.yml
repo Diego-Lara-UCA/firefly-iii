@@ -1,0 +1,76 @@
+# Nombre del workflow que aparecerá en la pestaña "Actions" de GitHub
+name: Cypress E2E Tests
+
+# Define cuándo se ejecutará el workflow
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ dev ]
+
+# Define los trabajos (jobs) que se ejecutarán
+jobs:
+  cypress-run:
+    # El tipo de máquina virtual donde se ejecutará el job
+    runs-on: ubuntu-latest
+
+    # Los pasos que componen el job
+    steps:
+      # 1. Descarga el código
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Configura PHP
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+
+      # 3. Instala dependencias de Composer SIN scripts
+      - name: Install Composer dependencies
+        run: composer install --no-scripts --no-interaction --no-progress
+
+      # 4. Prepara el entorno de Laravel
+      - name: Prepare Laravel Environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # 5. Configura la base de datos
+      - name: Setup Database
+        run: |
+          touch database/database.sqlite
+          php artisan migrate --seed --force
+
+      # 6. Configura Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 7. Cachea dependencias de Node
+      - name: Cache Node dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/Cypress
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+      # 8. Instala dependencias de Node
+      - name: Install Node dependencies
+        run: npm ci
+
+      # 9. Inicia el servidor y ejecuta las pruebas
+      - name: Run Cypress tests
+        run: npm run test:e2e
+
+      # 10. Guarda los artefactos
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-artifacts
+          path: |
+            cypress/screenshots
+            cypress/videos

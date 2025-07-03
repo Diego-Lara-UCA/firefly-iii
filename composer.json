@@ -97,7 +97,9 @@
         "league/csv": "^9.10",
         "league/fractal": "0.*",
         "mailersend/laravel-driver": "^2.7",
+        "mpdf/mpdf": "^8.2",
         "nunomaduro/collision": "^8",
+        "phpoffice/phpspreadsheet": "^4.2",
         "pragmarx/google2fa": "^8.0",
         "predis/predis": "^2.2",
         "psr/log": "<4",
@@ -109,6 +111,7 @@
         "symfony/expression-language": "^7.0",
         "symfony/http-client": "^7.1",
         "symfony/mailgun-mailer": "^7.1",
+        "szymach/c-pchart": "^3.0",
         "wijourdil/ntfy-notification-channel": "^3.0"
     },
     "require-dev": {
@@ -123,7 +126,7 @@
         "phpstan/phpstan": "^2",
         "phpstan/phpstan-deprecation-rules": "^2",
         "phpstan/phpstan-strict-rules": "^2",
-        "phpunit/phpunit": "^11"
+        "phpunit/phpunit": "^11.5"
     },
     "suggest": {},
     "autoload": {

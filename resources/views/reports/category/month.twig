@@ -5,7 +5,11 @@
 {% endblock %}
 
 {% block content %}
-
+    <div class="row">
+        <div class="col-lg-12 col-md-12 col-sm-12">
+            {% include 'reports.partials.export_button' %}
+        </div>
+    </div>
     <div class="row">
         <div class="col-lg-6 col-md-6 col-sm-12 col-xs-12">
             <div class="box">
@@ -246,8 +250,322 @@
         var avgIncomeUrl = '{{ route('report-data.category.avg-income', [accountIds, categoryIds, start.format('Ymd'), end.format('Ymd')]) }}';
         var topIncomeUrl = '{{ route('report-data.category.top-income', [accountIds, categoryIds, start.format('Ymd'), end.format('Ymd')]) }}';
 
+        // URL para el endpoint de exportación XLS (generación del archivo)
+        var exportXlsCategoryReportUrl = '{{ route('api.v1.data.export.xls.category-report') }}';
+        // URL para el endpoint de exportación PDF (generación del archivo)
+        var exportPdfCategoryReportUrl = '{{ route('api.v1.data.export.pdf.category-report') }}';
+
     </script>
     <script type="text/javascript" src="v1/js/ff/reports/category/month.js?v={{ FF_VERSION }}" nonce="{{ JS_NONCE }}"></script>
+
+    <script type="text/javascript" nonce="{{ JS_NONCE }}">
+        var exportInProgress = false;
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            const bgColor = type === 'success' ? '#28a745' : '#dc3545'; // Green for success, Red for error
+
+            Object.assign(toast.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '15px 20px',
+                backgroundColor: bgColor,
+                color: 'white',
+                borderRadius: '5px',
+                zIndex: '1050',
+                opacity: '0',
+                transform: 'translateY(-20px)',
+                transition: 'opacity 0.3s, transform 0.3s',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+            });
+
+            document.body.appendChild(toast);
+
+            // Fade and slide in
+            setTimeout(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateY(0)';
+            }, 100);
+
+            // Fade and slide out
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 4000);
+        }
+
+        function normalizeCurrencyString(originalCellText) {
+            if (typeof originalCellText !== 'string' || originalCellText.trim() === "") {
+                return originalCellText;
+            }
+
+            let cleanedText = originalCellText.replace(/[€$]/g, '').trim();
+
+            const hasDot = cleanedText.includes('.');
+            const hasComma = cleanedText.includes(',');
+
+            if (hasDot && hasComma) {
+                if (cleanedText.lastIndexOf(',') > cleanedText.lastIndexOf('.')) {
+                    cleanedText = cleanedText.replace(/\./g, '').replace(/,/g, '.');
+                } else {
+                    cleanedText = cleanedText.replace(/,/g, '');
+                }
+            } else if (hasComma) {
+                if (/,(\d{1,2})$/.test(cleanedText) && (cleanedText.match(/,/g) || []).length === 1) {
+                    cleanedText = cleanedText.replace(/,/g, '.');
+                } else {
+                    cleanedText = cleanedText.replace(/,/g, '');
+                }
+            } else if (hasDot) {
+                const dotCount = (cleanedText.match(/\./g) || []).length;
+                if (dotCount > 1) {
+                    cleanedText = cleanedText.replace(/\./g, '');
+                }
+            }
+
+            const numericValue = parseFloat(cleanedText);
+            return isNaN(numericValue) ? originalCellText : numericValue;
+        }
+
+        function parseHtmlTable(tableContainerId) {
+            const data = [];
+            const $table = $(`#${tableContainerId}`).find('table');
+            if ($table.length === 0) {
+                console.warn(`[${tableContainerId}] No se encontró la tabla.`);
+                return data;
+            }
+
+            $table.find('tbody tr, tfoot tr').each(function() {
+                const row = [];
+                $(this).find('td').each(function() {
+                    let cellText = $(this).text().trim();
+                    // For category report, don't normalize everything, as some columns are dates/text
+                    row.push(cellText);
+                });
+                if (row.length > 0) {
+                    data.push(row);
+                }
+            });
+            return data;
+        }
+
+        function getChartData(chartInstance) {
+            if (!chartInstance || !chartInstance.data || !chartInstance.data.labels || !chartInstance.data.datasets) {
+                return [];
+            }
+            const labels = chartInstance.data.labels;
+            const data = chartInstance.data.datasets[0].data;
+            const result = [];
+            labels.forEach((label, index) => {
+                result.push([label, data[index]]);
+            });
+            return result;
+        }
+
+        function getBarChartData(chartInstance) {
+            if (!chartInstance || !chartInstance.data || !chartInstance.data.labels || !chartInstance.data.datasets || chartInstance.data.datasets.length === 0) {
+                return { categories: [], values: [] };
+            }
+            const labels = chartInstance.data.labels;
+            const datasets = chartInstance.data.datasets;
+
+            const categories = [['Category'], ...labels.map(l => [l])];
+            const values = [];
+            
+            datasets.forEach(dataset => {
+                const datasetValues = [[dataset.label]];
+                dataset.data.forEach(value => {
+                    datasetValues.push([value.y ? value.y : value]);
+                });
+                values.push(...datasetValues.slice(1)); // Flatten data
+            });
+
+
+            return { categories: categories, values: values };
+        }
+
+        function handleExport(exportType, xlsUrl, pdfUrl, dataCollector, $button) {
+            if (exportInProgress) return;
+            exportInProgress = true;
+
+            var originalText = $button.html();
+            $button.addClass('disabled').prop('disabled', true).html('<span class="fa fa-spinner fa-spin"></span> Procesando...');
+
+            setTimeout(() => {
+                try {
+                    const exportData = dataCollector();
+                    console.log('Datos recopilados para procesar:', JSON.stringify(exportData, null, 2));
+
+                    const exportUrl = exportType === 'xls' ? xlsUrl : pdfUrl;
+                    const fileTypeMessage = exportType === 'xls' ? 'XLS' : 'PDF';
+                    const fileTypeExtension = exportType === 'xls' ? '.xlsx' : '.pdf';
+
+                    $.ajax({
+                        url: exportUrl,
+                        type: 'POST',
+                        data: JSON.stringify(exportData),
+                        contentType: 'application/json; charset=utf-8',
+                        headers: {
+                            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                        },
+                        processData: false,
+                        xhrFields: {
+                            responseType: 'blob'
+                        },
+                        success: function(data, status, xhr) {
+                            console.log('Respuesta recibida correctamente, Content-Type:', xhr.getResponseHeader('Content-Type'));
+                            const contentType = xhr.getResponseHeader('Content-Type');
+                            if (contentType && (contentType.includes('text/html') || contentType.includes('text/plain'))) {
+                                const reader = new FileReader();
+                                reader.onload = function() {
+                                    showToast(`Error inesperado. El servidor respondió con HTML en lugar de ${fileTypeMessage}. Revisa la consola.`, 'error');
+                                    console.error('Contenido de la respuesta HTML:', reader.result);
+                                };
+                                reader.readAsText(data);
+                                return;
+                            }
+                            const blob = new Blob([data], {type: contentType || 'application/' + exportType});
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            const contentDisposition = xhr.getResponseHeader('Content-Disposition');
+                            let fileName = 'reporte_' + moment().format('YYYYMMDD_HHmmss') + fileTypeExtension;
+                            if (contentDisposition) {
+                                const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                                if (fileNameMatch && fileNameMatch[1]) {
+                                    fileName = fileNameMatch[1].replace(/['"]/g, '');
+                                }
+                            }
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => {
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                            }, 100);
+                            showToast(`El informe ${fileTypeMessage} se está descargando.`, 'success');
+                        },
+                        error: function(xhr, status, error) {
+                            console.error('Error en la exportación:', error);
+                            showToast('Error al generar el informe.', 'error');
+                        },
+                        complete: function() {
+                            $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                            exportInProgress = false;
+                        }
+                    });
+                } catch (e) {
+                    console.error("Error durante la recolección de datos:", e);
+                    showToast("Error durante la recolección de datos. Revisa la consola.", 'error');
+                    $button.removeClass('disabled').prop('disabled', false).html(originalText);
+                    exportInProgress = false;
+                }
+            }, 10);
+        }
+
+        function collectCategoryReportData() {
+            const exportData = {
+                accountsTableData: parseHtmlTable('accountsHolder'),
+                categoriesTableData: parseHtmlTable('categoriesHolder'),
+                accountPerCategoryTableHeaders: [],
+                accountPerCategoryTableData: parseHtmlTable('accountPerCategoryHolder'),
+                avgExpenseDestAccountTableData: parseHtmlTable('avgExpensesHolder'),
+                avgEarningSourceAccountTableData: parseHtmlTable('avgIncomeHolder'),
+                topExpensesTableData: parseHtmlTable('topExpensesHolder'),
+                topRevenueTableData: parseHtmlTable('topIncomeHolder'),
+                expensePerCategoryChartData: [],
+                incomePerCategoryChartData: [],
+                expensePerBudgetChartData: [],
+                expensesPerSourceAccountChartData: [],
+                incomePerSourceAccountChartData: [],
+                expensesPerDestinationAccountChartData: [],
+                incomePerDestinationAccountChartData: [],
+                barChartsPerCategoryData: []
+            };
+
+            const $accountPerCategoryTable = $('#accountPerCategoryHolder').find('table');
+            $accountPerCategoryTable.find('thead tr th').each(function() {
+                exportData.accountPerCategoryTableHeaders.push($(this).text().trim());
+            });
+
+            if (window.categoryOutPieChart) {
+                exportData.expensePerCategoryChartData = [['Category', 'Amount'], ...getChartData(window.categoryOutPieChart)];
+            }
+            if (window.categoryInPieChart) {
+                exportData.incomePerCategoryChartData = [['Category', 'Amount'], ...getChartData(window.categoryInPieChart)];
+            }
+            if (window.budgetsOutPieChart) {
+                exportData.expensePerBudgetChartData = [['Budget', 'Amount'], ...getChartData(window.budgetsOutPieChart)];
+            }
+            if (window.sourceOutPieChart) {
+                exportData.expensesPerSourceAccountChartData = [['Source Account', 'Amount'], ...getChartData(window.sourceOutPieChart)];
+            }
+            if (window.sourceInPieChart) {
+                exportData.incomePerSourceAccountChartData = [['Source Account', 'Amount'], ...getChartData(window.sourceInPieChart)];
+            }
+            if (window.destOutPieChart) {
+                exportData.expensesPerDestinationAccountChartData = [['Destination Account', 'Amount'], ...getChartData(window.destOutPieChart)];
+            }
+            if (window.destInPieChart) {
+                exportData.incomePerDestinationAccountChartData = [['Destination Account', 'Amount'], ...getChartData(window.destInPieChart)];
+            }
+
+            $('.main_category_canvas').each(function() {
+                const canvas = this;
+                const chartInstance = Chart.getChart(canvas);
+                if (chartInstance) {
+                    const $box = $(canvas).closest('.box');
+                    const title = $box.find('.box-title').text().trim();
+                    const chartData = getBarChartData(chartInstance);
+
+                    exportData.barChartsPerCategoryData.push({
+                        title: title,
+                        categories: chartData.categories,
+                        values: chartData.values
+                    });
+                }
+            });
+
+            return exportData;
+        }
+
+        var initialAjaxCompleted = false;
+        function setupExportClickHandlers() {
+            if (initialAjaxCompleted) return;
+            initialAjaxCompleted = true;
+            
+            $('#exportXlsLink').off('click').on('click', function(e) {
+                e.preventDefault();
+                handleExport('xls', exportXlsCategoryReportUrl, exportPdfCategoryReportUrl, collectCategoryReportData, $(this));
+            });
+
+            $('#exportPdfLink').off('click').on('click', function(e) {
+                e.preventDefault();
+                handleExport('pdf', exportXlsCategoryReportUrl, exportPdfCategoryReportUrl, collectCategoryReportData, $(this));
+            });
+            console.log("Manejadores de clic para informes de categoría adjuntados.");
+        }
+
+        $(document).ajaxStop(function() {
+            setupExportClickHandlers();
+        });
+        
+        $(document).ready(function() {
+            setTimeout(function() {
+                if (!initialAjaxCompleted) {
+                     console.warn("ajaxStop no se disparó, adjuntando manejadores de clic directamente.");
+                     setupExportClickHandlers();
+                }
+            }, 2000);
+        });
+    </script>
 
 {% endblock %}
 
